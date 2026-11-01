@@ -253,6 +253,13 @@ details.more[open] summary::after{content:"–"}
 #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,140px);background:var(--navy);color:#fff;padding:.75rem 1.2rem;border-radius:14px;z-index:300;transition:transform .35s;max-width:90vw;text-align:center;font-size:.92rem}
 #toast.show{transform:translate(-50%,0)}
 
+.modal{position:fixed;inset:0;z-index:250;background:rgba(11,31,63,.45);display:grid;place-items:center;padding:1rem}
+.mbox{width:min(420px,100%);background:#fff;border-radius:20px;padding:1.4rem;box-shadow:0 30px 80px -20px rgba(0,0,0,.5)}
+.mbox h2{font-family:var(--display);font-weight:800;font-size:1.3rem;margin-bottom:.3rem}
+.acct{font-size:.9rem;color:var(--muted);background:var(--mist);border:1px solid var(--line);border-radius:14px;padding:.7rem .9rem;margin-top:1rem}
+.modeb{font-size:.72rem;font-weight:700;padding:.2rem .6rem;border-radius:99px;background:var(--sky);color:var(--muted)}
+.modeb.live{background:#d9f2e5;color:var(--ok)}
+.wallet{cursor:pointer}
 /* =========================================================
    INTRO: dark navy, car drives in, "Ride" + "Zy" in white
    ========================================================= */
@@ -295,7 +302,7 @@ details.more[open] summary::after{content:"–"}
       <button data-tab="trips">Trips</button>
       <button data-tab="safety">Safety</button>
     </nav>
-    <div class="tops"><span class="wx" id="wx" title="Weather at pickup"></span><span class="wallet" id="walletPill">Wallet ₹0</span></div>
+    <div class="tops"><span class="modeb" id="modeb" title="Demo = simulated drivers. Live = connected to the RideZy server.">Demo</span><span class="wx" id="wx" title="Weather at pickup"></span><button class="wallet" id="walletPill">Wallet ₹0</button></div>
   </header>
   <div class="due" id="due" hidden></div>
 
@@ -355,7 +362,8 @@ details.more[open] summary::after{content:"–"}
               <!-- STEP 3 -->
               <div id="s3" hidden>
                 <div class="sum" id="sum"></div>
-                <div class="two">
+                <div class="acct" id="acct" hidden></div>
+                <div class="two" id="detailsRow">
                   <div><label class="f" for="name">Your name</label><input class="in" id="name" placeholder="e.g. Priya" autocomplete="name"></div>
                   <div><label class="f" for="phone">Mobile number</label><input class="in" id="phone" placeholder="10 digits" inputmode="numeric" maxlength="10" autocomplete="tel"></div>
                 </div>
@@ -454,6 +462,23 @@ details.more[open] summary::after{content:"–"}
     </section>
   </main>
 </div>
+<div class="modal" id="auth" hidden role="dialog" aria-modal="true" aria-labelledby="atitle">
+  <div class="mbox">
+    <h2 id="atitle">Sign in</h2>
+    <p class="muted small">Enter your mobile number and we will text you a code.</p>
+    <label class="f" for="aphone">Mobile number</label>
+    <input class="in" id="aphone" inputmode="numeric" maxlength="10" placeholder="10 digits" autocomplete="tel">
+    <button class="btn" id="asend" style="width:100%;margin-top:.9rem;flex:none">Send code</button>
+    <div id="astep2" hidden>
+      <label class="f" for="acode">6-digit code</label>
+      <input class="in" id="acode" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <div id="anew" hidden><label class="f" for="aname">Your name</label><input class="in" id="aname" autocomplete="name" placeholder="e.g. Priya"></div>
+      <button class="btn" id="averify" style="width:100%;margin-top:.9rem;flex:none">Verify and continue</button>
+    </div>
+    <p class="hint" id="amsg" style="min-height:1.2em"></p>
+    <button class="linkbtn" id="aclose">Cancel</button>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -513,6 +538,64 @@ function haversine(a,b){const R=6371,r=x=>x*Math.PI/180,dLat=r(b.lat-a.lat),dLng
 async function fetchJSON(url,ms=7000){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
   try{const r=await fetch(url,{signal:c.signal});return await r.json()}finally{clearTimeout(t)}}
 
+/* ================= LIVE BACKEND (used automatically when the server is running) ================= */
+let REAL=false,HEALTH=null,API='',TOKEN=localStorage.getItem('ridezy_token')||'',USER=null,RR=null,ES=null;
+async function apiCall(path,body){
+  const r=await fetch(API+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.error||'Something went wrong. Please try again.');e.status=r.status;throw e}
+  return j;
+}
+async function detectBackend(){
+  for(const base of ['','http://localhost:3000']){
+    try{const j=await fetchJSON(base+'/api/health',2500);if(j&&j.ok){API=base;HEALTH=j;REAL=true;break}}catch(e){}
+  }
+  if(!REAL)return;
+  S.pay='online';
+  if(TOKEN){try{USER=(await apiCall('/api/me')).user;if(USER.role!=='rider')signOut(true)}catch(e){TOKEN='';USER=null;localStorage.removeItem('ridezy_token')}}
+  applyMode();
+  if(USER){connectEvents();restoreActive()}
+}
+function applyMode(){
+  $('#modeb').textContent='Live';$('#modeb').classList.add('live');
+  $('#detailsRow').hidden=true;$('#acct').hidden=false;$('#addmoney').hidden=true;
+  paintAccount();render();
+}
+function paintAccount(){
+  if(!REAL)return;
+  $('#acct').innerHTML=USER?`Signed in as <b>${esc(USER.name)}</b> (+91 ${USER.phone}) · <button class="linkbtn" id="signout">Sign out</button>`:'You will sign in with your mobile number when you confirm.';
+  const so=$('#signout');if(so)so.onclick=()=>signOut();
+}
+let authResolve=null;
+function openAuth(){return new Promise(res=>{authResolve=res;$('#auth').hidden=false;$('#amsg').textContent='';$('#astep2').hidden=true;$('#asend').textContent='Send code';$('#aphone').focus()})}
+function closeAuth(ok){$('#auth').hidden=true;if(authResolve){authResolve(ok);authResolve=null}}
+async function signOut(silent){
+  try{if(TOKEN)await apiCall('/api/auth/logout',{})}catch(e){}
+  TOKEN='';USER=null;localStorage.removeItem('ridezy_token');if(ES){ES.close();ES=null}
+  paintAccount();render();if(!silent)toast('Signed out.');
+}
+function wireAuth(){
+  $('#aclose').onclick=()=>closeAuth(false);
+  $('#asend').onclick=async()=>{
+    $('#amsg').textContent='';
+    try{
+      const j=await apiCall('/api/auth/request-otp',{phone:$('#aphone').value.trim()});
+      $('#astep2').hidden=false;$('#anew').hidden=!j.isNew;$('#asend').textContent='Resend code';
+      $('#amsg').textContent=j.devOtp?`Development mode: your code is ${j.devOtp}.`:'We sent a code to your phone.';
+      if(j.devOtp)$('#acode').value=j.devOtp;$('#acode').focus();
+    }catch(e){$('#amsg').textContent=e.message}
+  };
+  $('#averify').onclick=async()=>{
+    $('#amsg').textContent='';
+    try{
+      const j=await apiCall('/api/auth/verify',{phone:$('#aphone').value.trim(),code:$('#acode').value.trim(),name:$('#aname').value.trim(),role:'rider'});
+      TOKEN=j.token;USER=j.user;localStorage.setItem('ridezy_token',TOKEN);
+      connectEvents();paintAccount();render();closeAuth(true);
+    }catch(e){$('#amsg').textContent=e.message}
+  };
+  $('#walletPill').onclick=()=>{if(!REAL)return;if(USER){if(confirm('Sign out of RideZy?'))signOut()}else openAuth()};
+}
+
 /* ================= LEVELS + PROMOS ================= */
 function stats(){
   const t=S.trips.filter(x=>/^Completed/.test(x.status||'')),rides=t.length,km=t.reduce((a,x)=>a+(x.km||0),0),spent=t.reduce((a,x)=>a+x.total,0),trees=t.filter(x=>x.tree>0).length,xp=rides*20+Math.round(km);
@@ -569,7 +652,7 @@ function setStep(n){
   $('.wbody').scrollTop=0;
   if(n===3)render();
 }
-function goBook(n){showTab('book');if(!trip)setStep(n||step)}
+function goBook(n){showTab('book');if(!trip&&!RR)setStep(n||step)}
 function validateRoute(){
   if(!S.pickup||!S.drop){toast('Choose both pickup and drop from the suggestions.');setStep(1);return false}
   if(!S.route){toast('Still working out the route. Try again in a moment.');return false}
@@ -627,7 +710,7 @@ async function reverse(lat,lng){
   try{const j=await fetchJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);return j&&j.display_name?shortName(j.display_name):null}catch(e){return null}
 }
 async function mapPick(ll){
-  if(trip)return;
+  if(trip||RR)return;
   const key=!S.pickup?'pickup':!S.drop?'drop':null;
   if(!key){toast('Both points are set. Edit a field to change one.');return}
   const p={name:'Pinned location',lat:ll.lat,lng:ll.lng};setPlace(key,p);
@@ -728,8 +811,8 @@ function render(){
   $('#splitbtn').hidden=!(c&&S.riders>1);
   $('#riders').textContent=S.riders;
   $('#capnote').textContent=`${RIDES[S.type].name} fits ${RIDES[S.type].cap}`;
-  $('#walletPill').textContent='Wallet '+inr(S.wallet);
-  const nm=$('#name').value.trim().split(' ')[0];$('#hello').textContent=nm?`Where to, ${nm}?`:'Where to?';
+  $('#walletPill').textContent=REAL?(USER?USER.name.split(' ')[0]:'Sign in'):'Wallet '+inr(S.wallet);
+  const nm=(USER?USER.name:$('#name').value).trim().split(' ')[0];$('#hello').textContent=nm?`Where to, ${nm}?`:'Where to?';
   $('#sum').innerHTML=S.pickup&&S.drop?`<div class="rt"><span class="d2" style="background:#0b1f3f"></span><div><b>${esc(S.pickup.name.split(',')[0])}</b></div></div>${S.stop?`<div class="rt"><span class="d2" style="background:#b4831a"></span><div>${esc(S.stop.name.split(',')[0])}</div></div>`:''}<div class="rt"><span class="d2" style="background:#3f6fa8;border-radius:2px"></span><div><b>${esc(S.drop.name.split(',')[0])}</b></div></div><div class="meta">${RIDES[S.type].name} · ${whenText()}${c?` · ${c.km.toFixed(1)} km · ${c.min} min`:''}</div>`:'<span class="muted">Choose pickup and drop in step 1.</span>';
   buildCars();buildPays();buildForecast();buildOffers();
   $('#next').textContent=step===1?'Continue':'Review and pay';
@@ -746,7 +829,7 @@ function buildCars(){
 function buildPrefs(){$('#prefs').innerHTML=PREFS.map(p=>`<button class="chip ${S.prefs[p[0]]?'on':''}" data-p="${p[0]}" aria-pressed="${S.prefs[p[0]]}">${p[1]}${p[2]?' (+₹'+p[2]+')':''}</button>`).join('')}
 function buildVibes(){$('#vibes').innerHTML=VIBES.map(v=>`<button class="chip ${S.vibe===v?'on':''}" data-v="${v}" aria-pressed="${S.vibe===v}">${v}</button>`).join('')}
 function buildTips(){$('#tips').innerHTML=TIPS.map(t=>`<button class="chip ${S.tip===t?'on':''}" data-t="${t}">${t?'₹'+t:'No tip'}</button>`).join('')}
-function buildPays(){$('#pays').innerHTML=[['upi','UPI'],['cash','Cash'],['card','Card'],['wallet','Zy Wallet · '+inr(S.wallet)]].map(p=>`<button class="${S.pay===p[0]?'on':''}" data-pay="${p[0]}">${p[1]}</button>`).join('')}
+function buildPays(){$('#pays').innerHTML=(REAL?[['online','UPI, card or netbanking'],['cash','Cash to driver']]:[['upi','UPI'],['cash','Cash'],['card','Card'],['wallet','Zy Wallet · '+inr(S.wallet)]]).map(p=>`<button class="${S.pay===p[0]?'on':''}" data-pay="${p[0]}">${p[1]}</button>`).join('')}
 function buildRecents(){$('#recents').innerHTML=S.recents.length?S.recents.map((p,i)=>`<button class="chip" data-r="${i}">${esc(p.name.split(',')[0])}</button>`).join(''):''}
 function buildForecast(){
   const r=S.route;
@@ -921,7 +1004,7 @@ function scheduleRide(c){
 let dismissed=new Set();
 function checkDue(){
   const s=S.sched.find(x=>new Date(x.when)<=Date.now()&&!dismissed.has(x.id)),el=$('#due');
-  if(!s||trip){el.hidden=true;return}
+  if(!s||trip||RR){el.hidden=true;return}
   el.hidden=false;el.innerHTML=`<span>Your ride to <b>${esc(s.to.name.split(',')[0])}</b> is due.</span><button id="duego">Book now</button><button id="duex">Dismiss</button>`;
   $('#duego').onclick=()=>{S.sched=S.sched.filter(x=>x!==s);lsSet('ridezy_sched',S.sched);loadSched(s);setMode('now');buildCal();buildUpcoming();el.hidden=true;toast('Loaded. Continue to confirm your booking.')};
   $('#duex').onclick=()=>{dismissed.add(s.id);el.hidden=true};
@@ -931,6 +1014,7 @@ function checkDue(){
 let trip=null;
 const view=h=>{$('#tracker').innerHTML=h};
 function confirmBooking(){
+  if(REAL)return realConfirm();
   if(!validateRoute()||!validateDetails())return;
   const c=calc();
   if(S.pay==='wallet'&&c.total>S.wallet){toast(`Wallet has ${inr(S.wallet)}. Add money or choose another way to pay.`);return}
@@ -1061,6 +1145,145 @@ function finish(d){
   render();refreshCards();
 }
 
+/* ================= LIVE RIDES (real drivers, via the server) ================= */
+function loadScript(src){return new Promise((ok,no)=>{if(document.querySelector(`script[src="${src}"]`))return ok();const el=document.createElement('script');el.src=src;el.onload=ok;el.onerror=()=>no(new Error('Could not load the payment window. Check your internet connection.'));document.head.appendChild(el)})}
+const etaMin=(a,b,type)=>Math.max(1,Math.round(haversine(a,b)*1.3/RIDES[type].speed*60));
+async function realConfirm(){
+  if(!validateRoute())return;
+  const c=calc();
+  if(S.mode==='later')return scheduleRide(c);
+  if(!USER){const ok=await openAuth();if(!ok)return}
+  S.recents=[S.drop,...S.recents.filter(p=>p.name!==S.drop.name)].slice(0,4);lsSet('ridezy_recents',S.recents);buildRecents();
+  startReal(c);
+}
+async function startReal(c){
+  try{
+    const j=await apiCall('/api/rides',{pickup:S.pickup,drop:S.drop,stop:S.stop,type:S.type,km:S.route.km,min:S.route.min,total:c.total,payMethod:S.pay==='cash'?'cash':'online',note:$('#note').value,riders:S.riders});
+    RR={ride:j.ride,c,mk:null,dloc:null,saved:false};
+    openLiveUi();connectEvents();paintReal();
+  }catch(e){toast(e.message)}
+}
+function openLiveUi(){
+  $('#wizard').hidden=true;$('#tracker').hidden=false;$('#tabs [data-tab=book]').classList.add('live');
+  if(ambient&&map)map.removeLayer(ambient);
+}
+async function restoreActive(){
+  try{
+    const j=await apiCall('/api/rides/active');if(!j.ride||RR)return;
+    const r=j.ride;S.pickup=r.pickup;S.drop=r.drop;S.stop=r.stop;S.type=r.type;
+    setMarker('pickup');setMarker('drop');refreshRoute();
+    RR={ride:r,c:null,mk:null,dloc:r.driver&&r.driver.lat!=null?{lat:r.driver.lat,lng:r.driver.lng}:null,saved:r.status==='completed'};
+    openLiveUi();paintReal();moveMarker();
+  }catch(e){}
+}
+function connectEvents(){
+  if(!REAL||!TOKEN)return;
+  if(ES)ES.close();
+  ES=new EventSource(API+'/api/events?token='+encodeURIComponent(TOKEN));
+  ES.addEventListener('ride_update',e=>onRideUpdate(JSON.parse(e.data)));
+  ES.addEventListener('driver_location',e=>onDriverLoc(JSON.parse(e.data)));
+}
+function onRideUpdate(r){
+  if(!RR||RR.ride.id!==r.id)return;
+  const prev=RR.ride.status;RR.ride=r;
+  if(r.driver&&r.driver.lat!=null&&!RR.dloc)RR.dloc={lat:r.driver.lat,lng:r.driver.lng};
+  if(r.status==='completed'&&!RR.saved){RR.saved=true;saveRealTrip(r)}
+  moveMarker();
+  if(prev!==r.status||r.status==='completed')paintReal();
+  if(r.status==='cancelled')toast('This ride was cancelled.');
+}
+function onDriverLoc(d){
+  if(!RR||d.rideId!==RR.ride.id)return;
+  RR.dloc={lat:d.lat,lng:d.lng};moveMarker();liveBits();
+}
+function moveMarker(){
+  if(!map||!RR||!RR.dloc||!['accepted','arrived','started'].includes(RR.ride.status))return;
+  if(!RR.mk){RR.mk=driverMarker({lat:RR.dloc.lat,lng:RR.dloc.lng,type:RR.ride.type},true).addTo(map);fitTo([RR.ride.pickup,RR.dloc])}
+  else RR.mk.setLatLng([RR.dloc.lat,RR.dloc.lng]);
+}
+function liveBits(){
+  const r=RR.ride,eb=$('#etaBig');
+  if(r.status==='accepted'&&eb&&RR.dloc){eb.textContent=etaMin(RR.dloc,r.pickup,r.type)+' min';$('#etaSub').textContent=(haversine(RR.dloc,r.pickup)*1.3).toFixed(1)+' km away'}
+  if(r.status==='started'&&$('#pb')&&RR.dloc){
+    const rem=Math.min(r.km,haversine(RR.dloc,r.drop)*1.25);
+    $('#rk').textContent=rem.toFixed(1)+' km';$('#rm').textContent=Math.max(1,Math.round(rem/RIDES[r.type].speed*60))+' min';$('#pb').style.width=Math.max(0,Math.min(100,(1-rem/r.km)*100))+'%';
+  }
+}
+function paintReal(){
+  const r=RR.ride,d=r.driver,pn=esc(r.pickup.name.split(',')[0]),dn=esc(r.drop.name.split(',')[0]);
+  const common=()=>{
+    const c=$('#rcall');if(c)c.onclick=()=>{location.href='tel:+91'+d.phone};
+    const sh=$('#rshare');if(sh)sh.onclick=()=>copy(`I'm riding with RideZy: ${r.pickup.name} to ${r.drop.name}. Driver ${d.name}, ${d.model} ${d.plate}.`,'Trip details copied. Paste them to someone you trust.');
+    const cx=$('#rcx');if(cx)cx.onclick=cancelReal;
+    const so=$('#rsos');if(so)so.onclick=()=>toast('Demo: SOS is not connected to emergency services yet.');
+  };
+  if(r.status==='searching'){
+    view(`<div class="tt">Finding a driver</div><div class="radar"><i></i></div><p class="muted" style="text-align:center">Asking ${esc(RIDES[r.type].name)} drivers near ${pn}</p><div class="btns"><button id="rcx">Cancel</button></div>`);common();return;
+  }
+  if(r.status==='no_drivers'){
+    view(`<div class="tt">No drivers available</div><p class="muted">No ${esc(RIDES[r.type].name)} drivers are online nearby right now. Try again in a minute, or pick a different ride.</p><div class="btns"><button class="go" id="rretry">Try again</button><button id="rback">Back</button></div>`);
+    $('#rretry').onclick=()=>{const c=RR.c||calc();endReal();if(c)startReal(c)};$('#rback').onclick=endReal;return;
+  }
+  if(r.status==='cancelled'){
+    view(`<div class="tt">Ride cancelled</div><p class="muted">You can book another ride whenever you like.</p><div class="btns"><button class="go" id="rback">Back to booking</button></div>`);$('#rback').onclick=endReal;return;
+  }
+  const ctl=`<div class="btns"><button id="rcall">Call</button><button id="rshare">Share trip</button><button id="rcx">Cancel ride</button></div>`;
+  if(r.status==='accepted'){
+    const eta=RR.dloc?etaMin(RR.dloc,r.pickup,r.type):'–',km=RR.dloc?(haversine(RR.dloc,r.pickup)*1.3).toFixed(1)+' km away':'';
+    view(`<div class="tt">${esc(d.name)} is on the way</div>${steps(1)}<div class="etabig" id="etaBig">${eta} min</div><p class="muted" id="etaSub">${km}</p>${driverCard(d,`<div class="otp">Your OTP<b>${r.otp}</b></div>`)}${ctl}`);common();return;
+  }
+  if(r.status==='arrived'){
+    view(`<div class="tt">${esc(d.name)} has arrived</div>${steps(2)}<p>Look for <b>${esc(d.model)}</b>, plate <b>${esc(d.plate)}</b>. Tell the driver this OTP to start your trip.</p>${driverCard(d,`<div class="otp">Your OTP<b>${r.otp}</b></div>`)}${ctl}`);common();return;
+  }
+  if(r.status==='started'){
+    const rem=RR.dloc?Math.min(r.km,haversine(RR.dloc,r.drop)*1.25):r.km;
+    view(`<div class="tt">On your way to ${dn}</div>${steps(3)}
+      <div class="stats"><div><b id="rk">${rem.toFixed(1)} km</b><small>remaining</small></div><div><b id="rm">${Math.max(1,Math.round(rem/RIDES[r.type].speed*60))} min</b><small>to go</small></div><div><b>${inr(r.fare)}</b><small>fare</small></div></div>
+      <div class="bar"><i id="pb" style="width:${Math.max(0,Math.min(100,(1-rem/r.km)*100))}%"></i></div>${driverCard(d)}
+      <div class="btns"><button id="rcall">Call</button><button id="rshare">Share trip</button><button class="sos" id="rsos">SOS</button></div>`);common();return;
+  }
+  if(r.status==='completed'){
+    const needPay=r.payMethod==='online'&&r.payStatus!=='paid';
+    const head=`<div class="tt">${needPay?'You have arrived':'Trip complete'}</div>${steps(3)}<div class="total"><span>${r.payMethod==='cash'?'Pay in cash to the driver':needPay?'Total to pay':'Paid online'}</span><b>${inr(r.fare)}</b></div>`;
+    if(needPay){view(head+`<div class="btns"><button class="go" id="rpay">Pay ${inr(r.fare)}</button></div>`);
+      $('#rpay').onclick=async()=>{try{const ok=await payOnline(r);if(!ok)toast('Payment was not completed.')}catch(e){toast(e.message)}};return}
+    const fav=()=>S.favs.some(f=>f.plate===d.plate);
+    view(head+`<p style="margin:1rem 0 .2rem"><b>${r.rating?'Thanks for rating '+esc(d.name):'How was '+esc(d.name)+'?'}</b></p>
+      <div class="stars" id="stars">${[1,2,3,4,5].map(n=>`<button data-n="${n}" class="${r.rating&&n<=r.rating?'on':''}" aria-label="${n} stars">⭐</button>`).join('')}<button id="heart" aria-label="Save as favourite driver" style="font-size:1.6rem;margin-left:.5rem">${fav()?'❤️':'🤍'}</button></div>
+      <div class="btns"><button class="go" id="rdone">Done</button></div>`);
+    $('#stars').onclick=async e=>{const b=e.target.closest('button');if(!b||b.id==='heart'||RR.ride.rating)return;
+      try{await apiCall('/api/rides/'+r.id+'/rate',{stars:+b.dataset.n});RR.ride.rating=+b.dataset.n;paintReal()}catch(err){toast(err.message)}};
+    $('#heart').onclick=()=>{if(fav())S.favs=S.favs.filter(f=>f.plate!==d.plate);else S.favs.push({name:d.name,rating:d.rating,trips:d.trips,model:d.model,plate:d.plate,type:r.type});lsSet('ridezy_favs',S.favs);$('#heart').textContent=fav()?'❤️':'🤍';buildFavs()};
+    $('#rdone').onclick=()=>{endReal();toast('Thanks for riding with RideZy!')};
+  }
+}
+async function cancelReal(){
+  try{await apiCall('/api/rides/'+RR.ride.id+'/status',{status:'cancelled'});endReal();toast('Ride cancelled.')}catch(e){toast(e.message)}
+}
+function endReal(){
+  if(RR&&RR.mk&&map)map.removeLayer(RR.mk);
+  RR=null;$('#tracker').hidden=true;$('#wizard').hidden=false;$('#tabs [data-tab=book]').classList.remove('live');
+  if(map&&ambient)ambient.addTo(map);
+  if(S.route)drawRoute();setStep(1);render();refreshCards();
+}
+async function payOnline(r){
+  const o=await apiCall('/api/payments/order',{rideId:r.id});
+  if(o.demo){await apiCall('/api/payments/verify',{rideId:r.id,demo:true});RR.ride.payStatus='paid';toast('Demo payment recorded. Add Razorpay keys on the server for real payments.');paintReal();return true}
+  await loadScript('https://checkout.razorpay.com/v1/checkout.js');
+  return new Promise(res=>{
+    const rz=new Razorpay({key:o.keyId,amount:o.amount,currency:'INR',name:'RideZy',description:'Ride fare',order_id:o.orderId,prefill:{name:USER.name,contact:USER.phone},theme:{color:'#0b1f3f'},
+      handler:async resp=>{try{await apiCall('/api/payments/verify',{rideId:r.id,...resp});RR.ride.payStatus='paid';paintReal();res(true)}catch(e){toast(e.message);res(false)}},
+      modal:{ondismiss:()=>res(false)}});
+    rz.on('payment.failed',()=>toast('Payment failed. Please try again.'));rz.open();
+  });
+}
+function saveRealTrip(r){
+  S.trips.unshift({from:r.pickup.name,to:r.drop.name,fromP:r.pickup,toP:r.drop,type:RIDES[r.type].name,typeKey:r.type,total:r.fare,km:r.km,tree:RR&&RR.c?RR.c.tree:0,
+    thumb:S.route?makeThumb(S.route.coords):null,date:new Date().toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}),
+    status:'Completed with '+(r.driver?r.driver.name:'driver'),rows:RR&&RR.c?RR.c.rows:[]});
+  S.trips=S.trips.slice(0,20);lsSet('ridezy_trips',S.trips);refreshCards();
+}
+
 /* ================= INTRO (5 seconds) ================= */
 (function(){
   const intro=$('#intro'),reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1078,7 +1301,7 @@ function finish(d){
   S.saved=ls('ridezy_saved',S.saved).map(s=>({label:s.label,place:s.place}));Object.assign(S.safety,ls('ridezy_safety',{}));
   $('#scname').value=S.safety.name||'';$('#scphone').value=S.safety.phone||'';$('#autoshare').checked=!!S.safety.autoShare;$('#checkin').checked=!!S.safety.checkin;
   $('#date').value=S.date;$('#date').min=ymd(new Date());
-  initMap();buildPrefs();buildVibes();buildTips();buildRecents();wire();setStep(1);render();refreshCards();loadWeather();
+  initMap();buildPrefs();buildVibes();buildTips();buildRecents();wire();wireAuth();setStep(1);render();refreshCards();loadWeather();detectBackend();
   setInterval(()=>{if(document.hidden)return;buildUpcoming();checkDue()},20000);checkDue();
 })();
 </script>

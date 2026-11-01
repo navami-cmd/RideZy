@@ -1,0 +1,11 @@
+{
+  "name": "ridezy",
+  "version": "1.0.0",
+  "description": "A simple ride-booking web app with live routes, fare estimates and driver tracking.",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED"
+}

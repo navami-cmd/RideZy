@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideZy Driver</title>
+<link rel="icon" href="images/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,800;9..144,900&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--navy:#0b1f3f;--ink:#10243f;--muted:#5b7089;--blue:#3f6fa8;--sky:#e6eff7;--mist:#f5f9fc;--line:#dbe5ee;--ok:#2e7d5b;--bad:#c4314b;--display:'Fraunces',Georgia,serif;--body:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+body{font:16px/1.45 var(--body);color:var(--ink);background:#eaf1f7 url('images/canvas.jpg') center/cover fixed;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid rgba(63,111,168,.55);outline-offset:2px}
+.wrap{max-width:1100px;margin:0 auto;padding:14px}
+.top{display:flex;align-items:center;gap:1rem;padding:.7rem 1.1rem;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:18px;margin-bottom:12px}
+.brand{display:flex;align-items:center;gap:.6rem;font-family:var(--display);font-weight:900;font-size:1.4rem;color:var(--navy)}
+.brand img{height:24px}
+.brand small{font-family:var(--body);font-weight:600;font-size:.78rem;color:var(--muted);background:var(--sky);padding:.15rem .6rem;border-radius:99px}
+.sp{flex:1}
+.pill{padding:.35rem .8rem;border-radius:99px;font-weight:700;font-size:.85rem;background:var(--sky);color:var(--navy)}
+.pill.on{background:#d9f2e5;color:var(--ok)}
+.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:20px;padding:1.2rem 1.3rem;box-shadow:0 14px 34px -22px rgba(16,36,63,.35)}
+.card h2{font-family:var(--display);font-weight:800;font-size:1.2rem;margin-bottom:.8rem}
+label.f{display:block;font-size:.82rem;font-weight:600;margin:.9rem 0 .3rem}
+.in,select{width:100%;padding:.75rem 1rem;border-radius:14px;border:1px solid var(--line);background:#fff}
+.in:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(63,111,168,.15)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.btn{width:100%;padding:.9rem;border-radius:14px;background:var(--navy);color:#fff;font-weight:700;margin-top:1rem}
+.btn:hover{background:#16315c}
+.btn.green{background:var(--ok)}.btn.red{background:var(--bad)}
+.btn.ghost{background:var(--sky);color:var(--navy)}
+.btn:disabled{opacity:.5;cursor:default}
+.hint{font-size:.82rem;color:var(--muted);margin-top:.5rem}
+.msg{font-size:.88rem;margin-top:.6rem;min-height:1.2em;color:var(--bad)}
+.auth{max-width:440px;margin:6vh auto}
+.grid{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:12px;align-items:start}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+#map{height:420px;border-radius:20px;border:1px solid var(--line)}
+.req{background:#fff;border:1px solid var(--line);border-radius:16px;padding:.9rem;margin-bottom:.7rem}
+.req b{font-family:var(--display);font-size:1.25rem}
+.req .route{font-size:.92rem;margin:.3rem 0}
+.req .meta{font-size:.82rem;color:var(--muted)}
+.cd{height:4px;border-radius:4px;background:var(--line);margin:.6rem 0;overflow:hidden}
+.cd i{display:block;height:100%;width:100%;background:var(--blue);transition:width 1s linear}
+.row{display:flex;gap:.5rem}
+.row .btn{margin-top:.4rem}
+.steps{display:flex;gap:4px;margin:.5rem 0 1rem}
+.steps i{flex:1;height:4px;border-radius:4px;background:var(--line)}
+.steps i.on{background:var(--navy)}
+.big{font-family:var(--display);font-weight:900;font-size:1.7rem}
+.kv{display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px dashed var(--line);font-size:.92rem}
+.kv span:first-child{color:var(--muted)}
+a.tel{color:var(--blue);font-weight:700;text-decoration:none}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,140px);background:var(--navy);color:#fff;padding:.75rem 1.2rem;border-radius:14px;z-index:300;transition:transform .35s;max-width:90vw;text-align:center;font-size:.92rem}
+#toast.show{transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><img src="images/logo.png" alt="">RideZy <small>Driver</small></div>
+    <div class="sp"></div>
+    <span class="pill" id="state" hidden>Offline</span>
+    <button class="pill" id="logout" hidden>Sign out</button>
+  </header>
+
+  <!-- SIGN IN -->
+  <section class="card auth" id="auth">
+    <h2>Drive with RideZy</h2>
+    <p class="muted hint" style="margin-top:0">Sign in with your mobile number. New drivers add their vehicle once.</p>
+    <label class="f" for="phone">Mobile number</label>
+    <input class="in" id="phone" inputmode="numeric" maxlength="10" placeholder="10 digits">
+    <button class="btn" id="send">Send code</button>
+    <div id="step2" hidden>
+      <label class="f" for="code">6-digit code</label>
+      <input class="in" id="code" inputmode="numeric" maxlength="6">
+      <div id="newbox" hidden>
+        <label class="f" for="name">Your name</label><input class="in" id="name" autocomplete="name">
+        <div class="two">
+          <div><label class="f" for="vtype">Vehicle</label><select id="vtype"><option value="bike">Bike</option><option value="pool">Pool car</option><option value="auto">Auto</option><option value="mini" selected>Mini</option><option value="sedan">Sedan</option><option value="suv">XL / SUV</option><option value="luxe">Luxe</option></select></div>
+          <div><label class="f" for="vmodel">Model</label><input class="in" id="vmodel" placeholder="Maruti Swift"></div>
+        </div>
+        <label class="f" for="vplate">Number plate</label><input class="in" id="vplate" placeholder="TN 19 AB 1234">
+      </div>
+      <button class="btn green" id="verify">Verify and continue</button>
+    </div>
+    <div class="msg" id="amsg"></div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <div class="grid" id="dash" hidden>
+    <div>
+      <section class="card" style="margin-bottom:12px">
+        <h2 id="who">Driver</h2>
+        <div class="kv"><span>Vehicle</span><span id="veh"></span></div>
+        <div class="kv"><span>Trips completed</span><span id="trips">0</span></div>
+        <div class="kv"><span>Location</span><span id="locTxt">not set</span></div>
+        <label class="f" for="locsrc">Location source</label>
+        <select id="locsrc"><option value="demo">Demo location (simulated driving)</option><option value="gps">My GPS</option></select>
+        <div id="demobox">
+          <label class="f" for="startAt">Start from</label>
+          <select id="startAt"></select>
+        </div>
+        <button class="btn" id="toggle">Go online</button>
+        <div class="msg" id="dmsg"></div>
+      </section>
+      <section class="card" id="reqCard">
+        <h2>Ride requests</h2>
+        <div id="reqs"><p class="hint" style="margin-top:0">Go online to receive requests nearby.</p></div>
+      </section>
+      <section class="card" id="rideCard" hidden></section>
+    </div>
+    <div><div id="map"></div></div>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),3200)}
+const haversine=(a,b)=>{const R=6371,r=x=>x*Math.PI/180,dLat=r(b.lat-a.lat),dLng=r(b.lng-a.lng);const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const PLACES=[['Singaperumal Koil',12.752,80.000],['Chengalpattu',12.682,79.989],['Tambaram',12.925,80.100],['Chennai Airport',12.994,80.171],['Guindy',13.007,80.221],['Velachery',12.982,80.218],['T Nagar',13.042,80.234],['Marina Beach',13.050,80.282]];
+
+/* ---------- api ---------- */
+let API='',token=localStorage.getItem('ridezy_driver_token')||'',me=null;
+async function detectApi(){
+  for(const base of ['','http://localhost:3000']){
+    try{const r=await fetch(base+'/api/health');const j=await r.json();if(j&&j.ok){API=base;return true}}catch(e){}
+  }
+  return false;
+}
+async function api(path,body){
+  const r=await fetch(API+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.error||'Something went wrong.');e.status=r.status;throw e}
+  return j;
+}
+
+/* ---------- sign in ---------- */
+let isNew=false;
+$('#send').onclick=async()=>{
+  const phone=$('#phone').value.trim();$('#amsg').textContent='';
+  try{
+    const j=await api('/api/auth/request-otp',{phone});
+    isNew=j.isNew;$('#step2').hidden=false;$('#newbox').hidden=!isNew;$('#send').textContent='Resend code';
+    $('#amsg').style.color='#5b7089';
+    $('#amsg').textContent=j.devOtp?`Development mode: your code is ${j.devOtp}.`:'We sent a code to your phone.';
+    if(j.devOtp)$('#code').value=j.devOtp;
+  }catch(e){$('#amsg').style.color='';$('#amsg').textContent=e.message}
+};
+$('#verify').onclick=async()=>{
+  $('#amsg').textContent='';$('#amsg').style.color='';
+  try{
+    const j=await api('/api/auth/verify',{phone:$('#phone').value.trim(),code:$('#code').value.trim(),role:'driver',name:$('#name').value.trim(),
+      vehicle:{type:$('#vtype').value,model:$('#vmodel').value,plate:$('#vplate').value}});
+    token=j.token;localStorage.setItem('ridezy_driver_token',token);me=j.user;start();
+  }catch(e){$('#amsg').textContent=e.message}
+};
+$('#logout').onclick=async()=>{try{await api('/api/auth/logout',{})}catch(e){}localStorage.removeItem('ridezy_driver_token');location.reload()};
+
+/* ---------- dashboard ---------- */
+let map=null,mDriver=null,mPickup=null,mDrop=null,es=null,wantOnline=false,onlineNow=false,pos=null,loopT=null,ride=null;
+const reqs=new Map();
+function initMap(){
+  if(typeof L==='undefined')return;
+  map=L.map('map').setView([12.9,80.15],10);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri',maxZoom:19}).addTo(map);
+}
+const pin=(c,t)=>L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${c};color:#fff;font-weight:700;font-size:.75rem;display:grid;place-items:center;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3)">${t}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
+function setM(kind,p){
+  if(!map)return;
+  const cfg={driver:['#0b1f3f','D'],pickup:['#3f6fa8','A'],drop:['#2e7d5b','B']}[kind];
+  const key={driver:'mDriver',pickup:'mPickup',drop:'mDrop'}[kind];
+  const cur={mDriver,mPickup,mDrop}[key];
+  if(cur)map.removeLayer(cur);
+  const m=p?L.marker([p.lat,p.lng],{icon:pin(cfg[0],cfg[1])}).addTo(map):null;
+  if(key==='mDriver')mDriver=m;else if(key==='mPickup')mPickup=m;else mDrop=m;
+}
+async function start(){
+  $('#auth').hidden=true;$('#dash').hidden=false;$('#logout').hidden=false;$('#state').hidden=false;
+  me=me||(await api('/api/me')).user;
+  $('#who').textContent=me.name;$('#veh').textContent=me.vehicle?`${me.vehicle.model} · ${me.vehicle.plate}`:'';$('#trips').textContent=me.trips||0;
+  $('#startAt').innerHTML=PLACES.map((p,i)=>`<option value="${i}">${p[0]}</option>`).join('');
+  initMap();
+  setPos({lat:PLACES[0][1],lng:PLACES[0][2]});
+  connect();
+  try{const a=await api('/api/rides/active');if(a.ride)showRide(a.ride)}catch(e){}
+}
+function setPos(p){pos=p;$('#locTxt').textContent=`${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;setM('driver',p);if(map&&!ride)map.setView([p.lat,p.lng],13)}
+$('#startAt').onchange=()=>{const p=PLACES[+$('#startAt').value];setPos({lat:p[1],lng:p[2]});if(onlineNow)api('/api/driver/location',pos).catch(()=>{})};
+$('#locsrc').onchange=()=>{$('#demobox').hidden=$('#locsrc').value!=='demo';if($('#locsrc').value==='gps')watchGps()};
+let gpsId=null;
+function watchGps(){
+  if(!navigator.geolocation){toast('GPS is not available here. Using the demo location.');$('#locsrc').value='demo';return}
+  if(gpsId!==null)navigator.geolocation.clearWatch(gpsId);
+  gpsId=navigator.geolocation.watchPosition(p=>{if($('#locsrc').value==='gps')setPos({lat:p.coords.latitude,lng:p.coords.longitude})},()=>{toast('Could not read your GPS. Allow location access.');$('#locsrc').value='demo'},{enableHighAccuracy:true});
+}
+
+/* go online / offline */
+$('#toggle').onclick=async()=>{
+  $('#dmsg').textContent='';
+  try{
+    if(!wantOnline){
+      if($('#locsrc').value==='gps'&&!pos){toast('Waiting for GPS…');return}
+      await api('/api/driver/online',{online:true,lat:pos.lat,lng:pos.lng});wantOnline=onlineNow=true;
+    }else{
+      if(ride&&['accepted','arrived','started'].includes(ride.status)){toast('Finish your current ride first.');return}
+      await api('/api/driver/online',{online:false});wantOnline=onlineNow=false;reqs.clear();drawReqs();
+    }
+    paintState();
+  }catch(e){$('#dmsg').textContent=e.message}
+};
+function paintState(){
+  $('#toggle').textContent=wantOnline?'Go offline':'Go online';$('#toggle').classList.toggle('red',wantOnline);
+  const s=$('#state');s.textContent=wantOnline?'Online':'Offline';s.classList.toggle('on',wantOnline);
+  if(!wantOnline)$('#reqs').innerHTML='<p class="hint" style="margin-top:0">Go online to receive requests nearby.</p>';else drawReqs();
+}
+
+/* live stream */
+function connect(){
+  if(es)es.close();
+  es=new EventSource(API+'/api/events?token='+encodeURIComponent(token));
+  es.addEventListener('hello',()=>{if(wantOnline&&pos)api('/api/driver/online',{online:true,lat:pos.lat,lng:pos.lng}).catch(()=>{})});
+  es.addEventListener('ride_request',e=>{const r=JSON.parse(e.data);if(ride&&['accepted','arrived','started'].includes(ride.status))return;r.expires=Date.now()+55000;reqs.set(r.id,r);drawReqs();toast('New ride request nearby')});
+  es.addEventListener('ride_taken',e=>{reqs.delete(JSON.parse(e.data).id);drawReqs()});
+  es.addEventListener('ride_update',e=>{const r=JSON.parse(e.data);if(ride&&r.id!==ride.id&&!['completed','cancelled'].includes(ride.status))return;showRide(r)});
+}
+function drawReqs(){
+  if(!wantOnline)return;
+  const list=[...reqs.values()].filter(r=>r.expires>Date.now());
+  $('#reqs').innerHTML=list.length?list.map(r=>`<div class="req" data-id="${r.id}"><b>${inr(r.fare)}</b> <span class="meta">· ${r.km.toFixed(1)} km · ${r.payMethod==='cash'?'cash':'paid online'}</span>
+    <div class="route"><b style="font-size:.95rem;font-family:inherit">${esc(r.pickup.name.split(',')[0])}</b> to ${esc(r.drop.name.split(',')[0])}</div>
+    <div class="meta">${r.distanceToPickup} km to pickup${r.note?' · '+esc(r.note):''}</div>
+    <div class="cd"><i style="width:${Math.max(0,(r.expires-Date.now())/55000*100)}%"></i></div>
+    <div class="row"><button class="btn green" data-a="acc">Accept</button><button class="btn ghost" data-a="no">Decline</button></div></div>`).join(''):'<p class="hint" style="margin-top:0">Waiting for requests near you…</p>';
+}
+$('#reqs').onclick=async e=>{
+  const b=e.target.closest('button');if(!b)return;const id=b.closest('.req').dataset.id;
+  if(b.dataset.a==='no'){reqs.delete(id);drawReqs();return}
+  try{const j=await api('/api/rides/'+id+'/accept',{});reqs.clear();showRide(j.ride)}catch(err){toast(err.message);reqs.delete(id);drawReqs()}
+};
+setInterval(()=>{if(reqs.size){for(const [id,r] of reqs)if(r.expires<=Date.now())reqs.delete(id);drawReqs()}},1000);
+
+/* active ride */
+const STEP={accepted:0,arrived:1,started:2,completed:3};
+function showRide(r){
+  ride=r;const card=$('#rideCard');
+  if(r.status==='cancelled'){card.hidden=false;card.innerHTML='<h2>Ride cancelled</h2><p class="hint" style="margin-top:0">The rider cancelled this trip.</p><button class="btn ghost" id="dismiss">OK</button>';$('#dismiss').onclick=clearRide;toast('Ride cancelled');return}
+  $('#reqCard').hidden=true;card.hidden=false;
+  setM('pickup',r.pickup);setM('drop',r.drop);
+  if(map)map.fitBounds(L.latLngBounds([[r.pickup.lat,r.pickup.lng],[r.drop.lat,r.drop.lng],[pos.lat,pos.lng]]),{padding:[40,40]});
+  const i=STEP[r.status]??0;
+  const steps=`<div class="steps">${[0,1,2,3].map(n=>`<i class="${n<=i?'on':''}"></i>`).join('')}</div>`;
+  const rider=r.rider||{};
+  const info=`<div class="kv"><span>Rider</span><span>${esc(rider.name||'')}${rider.phone?` · <a class="tel" href="tel:+91${rider.phone}">${rider.phone}</a>`:''}</span></div>
+    <div class="kv"><span>Pickup</span><span>${esc(r.pickup.name.split(',')[0])}</span></div>
+    <div class="kv"><span>Drop</span><span>${esc(r.drop.name.split(',')[0])}</span></div>
+    <div class="kv"><span>Fare</span><span>${inr(r.fare)} · ${r.payMethod==='cash'?'collect cash':'paid online'}</span></div>${r.note?`<div class="kv"><span>Note</span><span>${esc(r.note)}</span></div>`:''}`;
+  let body='';
+  if(r.status==='accepted')body=`<div class="big">Head to pickup</div>${steps}${info}<button class="btn" id="act" data-s="arrived">I have arrived</button><button class="btn ghost" id="cancel">Cancel ride</button>`;
+  else if(r.status==='arrived')body=`<div class="big">Waiting for rider</div>${steps}${info}<label class="f" for="otp">Rider's 4-digit OTP</label><input class="in" id="otp" inputmode="numeric" maxlength="4"><button class="btn green" id="act" data-s="started">Start trip</button><button class="btn ghost" id="cancel">Cancel ride</button>`;
+  else if(r.status==='started')body=`<div class="big">Trip in progress</div>${steps}${info}<button class="btn green" id="act" data-s="completed">Complete trip</button>`;
+  else if(r.status==='completed')body=`<div class="big">Trip complete</div>${steps}${info}<p class="hint">${r.payMethod==='cash'?'Collect '+inr(r.fare)+' in cash.':r.payStatus==='paid'?'Payment received online.':'Waiting for the rider to pay online.'}</p><button class="btn" id="dismiss">Back to requests</button>`;
+  card.innerHTML=body;
+  const act=$('#act');if(act)act.onclick=()=>step(act.dataset.s);
+  const c=$('#cancel');if(c)c.onclick=()=>step('cancelled');
+  const d=$('#dismiss');if(d)d.onclick=clearRide;
+}
+async function step(status){
+  try{const j=await api('/api/rides/'+ride.id+'/status',{status,otp:$('#otp')?$('#otp').value:undefined});showRide(j.ride);if(status==='completed'){me=(await api('/api/me')).user;$('#trips').textContent=me.trips||0}if(status==='cancelled')clearRide()}
+  catch(e){toast(e.message)}
+}
+function clearRide(){ride=null;setM('pickup',null);setM('drop',null);$('#rideCard').hidden=true;$('#reqCard').hidden=false;drawReqs()}
+
+/* location loop: sends position; in demo mode it also drives toward pickup, then the drop */
+let leg=null;
+setInterval(()=>{
+  if(!pos||!onlineNow)return;
+  if($('#locsrc').value==='demo'&&ride&&['accepted','started'].includes(ride.status)){
+    const target=ride.status==='accepted'?ride.pickup:ride.drop,d=haversine(pos,target);
+    if(!leg||leg.id!==ride.id+ride.status)leg={id:ride.id+ride.status,total:d};
+    // demo speed: every leg takes about 25 seconds, however long the real distance is
+    if(d>0.02){const step=Math.min(d,Math.max(0.045,leg.total/16)),f=step/d;pos={lat:pos.lat+(target.lat-pos.lat)*f,lng:pos.lng+(target.lng-pos.lng)*f};setPos(pos)}
+  }
+  api('/api/driver/location',pos).catch(()=>{});
+},1500);
+
+/* ---------- boot ---------- */
+(async()=>{
+  const ok=await detectApi();
+  if(!ok){$('#amsg').textContent='Cannot reach the RideZy server. Start it with: node server/server.js';return}
+  if(token){try{me=(await api('/api/me')).user;if(me.role!=='driver'){localStorage.removeItem('ridezy_driver_token');token='';me=null}else{start();return}}catch(e){token='';localStorage.removeItem('ridezy_driver_token')}}
+})();
+</script>
+</body>
+</html>
