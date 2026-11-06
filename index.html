@@ -164,8 +164,12 @@ details.more[open] summary::after{content:"–"}
 .mpill{position:absolute;left:.9rem;bottom:.9rem;z-index:500;background:rgba(255,255,255,.96);padding:.5rem .9rem;border-radius:12px;font-size:.86rem;font-weight:500;max-width:calc(100% - 1.8rem);box-shadow:0 4px 14px -6px rgba(16,36,63,.4)}
 .pin{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:.75rem;border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3)}
 .pin.pickup{background:#0b1f3f}.pin.drop{background:#3f6fa8}.pin.stop{background:#b4831a}
-.dv{width:32px;height:32px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:17px;box-shadow:0 3px 10px rgba(0,0,0,.28)}
+.dv{width:28px;height:28px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,.3);border:2px solid var(--navy)}
 .dv.big{border:3px solid var(--blue)}
+.mstyle{position:absolute;top:.8rem;right:.8rem;z-index:500;display:flex;background:rgba(255,255,255,.96);border-radius:12px;padding:3px;box-shadow:0 4px 14px -6px rgba(16,36,63,.4)}
+.mstyle button{padding:.35rem .7rem;border-radius:9px;font-size:.8rem;font-weight:600;color:var(--muted)}
+.mstyle button.on{background:var(--navy);color:#fff}
+.maperr{position:absolute;inset:0;z-index:400;display:grid;place-items:center;text-align:center;padding:2rem;background:rgba(228,237,245,.92);color:var(--muted);font-weight:500}
 
 /* schedule */
 .calwrap{background:#fff;border:1px solid var(--line);border-radius:16px;padding:.8rem}
@@ -394,7 +398,7 @@ details.more[open] summary::after{content:"–"}
           <div id="tracker" hidden></div>
         </section>
         <div class="mapside">
-          <div class="mapwrap" id="mapcard"><div id="map"></div><div class="mpill" id="mapinfo">Enter pickup and drop to see your route</div></div>
+          <div class="mapwrap" id="mapcard"><div id="map"></div><div class="mstyle" id="mstyle"><button data-s="light" class="on">Light</button><button data-s="streets">Streets</button><button data-s="sat">Satellite</button></div><div class="maperr" id="maperr" hidden>The map pictures cannot load. Check your internet connection, or try another map style.</div><div class="mpill" id="mapinfo">Enter pickup and drop to see your route</div></div>
         </div>
       </div>
     </section>
@@ -557,6 +561,7 @@ async function detectBackend(){
   if(USER){connectEvents();restoreActive()}
 }
 function applyMode(){
+  if(S.pickup)spawnAmbient();
   $('#modeb').textContent='Live';$('#modeb').classList.add('live');
   $('#detailsRow').hidden=true;$('#acct').hidden=false;$('#addmoney').hidden=true;
   paintAccount();render();
@@ -673,23 +678,33 @@ let map=null,routeLine=null,glow=null,ambient=null;const mk={};
 function initMap(){
   if(typeof L==='undefined'){$('#map').innerHTML='<div class="nomap">The map could not load. Check your internet connection and refresh. You can still search places and see fares.</div>';return}
   map=L.map('map').setView([13.0,80.15],10);
-  addTiles();
+  const saved=ls('ridezy_base','light');
+  loadBase(BASES[saved]?saved:'light',true);
+  $('#mstyle').onclick=e=>{const b=e.target.closest('button');if(b)loadBase(b.dataset.s)};
+  if('ResizeObserver' in window)new ResizeObserver(()=>map.invalidateSize()).observe($('#map'));
   ambient=L.layerGroup().addTo(map);
   map.on('click',e=>mapPick(e.latlng));
   addEventListener('resize',()=>map.invalidateSize());
 }
-/* Map tiles: none of these need an API key. If one fails to load, the next is used. */
-const TILES=[
- {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',attr:'Tiles © Esri'},
- {url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',attr:'© OpenStreetMap contributors'},
- {url:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',attr:'© OpenStreetMap contributors © CARTO'}
-];
-let tileIdx=0,tileLayer=null;
-function addTiles(){
-  if(tileLayer)map.removeLayer(tileLayer);
-  const t=TILES[tileIdx];let errs=0;
-  tileLayer=L.tileLayer(t.url,{attribution:t.attr,maxZoom:19,subdomains:'abc'}).addTo(map);
-  tileLayer.on('tileerror',()=>{if(++errs===5&&tileIdx<TILES.length-1){tileIdx++;addTiles()}});
+/* Map styles: all free, no API key. If a style fails to load, OpenStreetMap is used instead. */
+const BASES={
+ light:{layers:[['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16}],['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16}]],attr:'Tiles © Esri'},
+ streets:{layers:[['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{}]],attr:'Tiles © Esri'},
+ sat:{layers:[['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{}]],attr:'Tiles © Esri, Maxar, Earthstar Geographics'},
+ osm:{layers:[['https://tile.openstreetmap.org/{z}/{x}/{y}.png',{}]],attr:'© OpenStreetMap contributors'}
+};
+let baseGroup=null,tilesLoaded=0,baseTimer=null;
+function loadBase(name,auto){
+  if(!map)return;
+  if(baseGroup)map.removeLayer(baseGroup);
+  tilesLoaded=0;const b=BASES[name];
+  baseGroup=L.layerGroup(b.layers.map(([u,o],i)=>{
+    const l=L.tileLayer(u,{maxZoom:19,attribution:i===0?b.attr:'',...o});
+    l.on('tileload',()=>{tilesLoaded++;$('#maperr').hidden=true});return l})).addTo(map);
+  document.querySelectorAll('#mstyle button').forEach(x=>x.classList.toggle('on',x.dataset.s===name));
+  if(!auto)lsSet('ridezy_base',name);
+  clearTimeout(baseTimer);
+  baseTimer=setTimeout(()=>{if(tilesLoaded===0){if(name!=='osm')loadBase('osm',true);else $('#maperr').hidden=false}},7000);
 }
 const icon=(html,s)=>L.divIcon({className:'',html,iconSize:[s,s],iconAnchor:[s/2,s/2]});
 function setMarker(key){
@@ -782,12 +797,31 @@ let drivers=[],wander=null;
 function offsetPoint(p,km){const a=rnd(0,6.283);return{lat:p.lat+km*Math.cos(a)/111,lng:p.lng+km*Math.sin(a)/(111*Math.cos(p.lat*Math.PI/180))}}
 const plate=()=>'TN '+pick(['19','22','21','11'])+' '+String.fromCharCode(65+Math.random()*26|0)+String.fromCharCode(65+Math.random()*26|0)+' '+Math.floor(rnd(1000,9999));
 function makeDriver(type,p,a,b){const q=offsetPoint(p,rnd(a,b));return{name:pick(NAMES),type,lat:q.lat,lng:q.lng,rating:(4.5+Math.random()*.5).toFixed(1),trips:Math.floor(rnd(400,6000)),model:pick(RIDES[type].models),plate:plate()}}
-function driverMarker(d,big){return L.marker([d.lat,d.lng],{icon:icon(`<div class="dv ${big?'big':''}">${EMOJI[d.type]}</div>`,32)})}
+function driverMarker(d,big){return L.marker([d.lat,d.lng],{icon:icon(`<div class="dv ${big?'big':''}">${EMOJI[d.type]}</div>`,big?34:28)})}
+// only the selected ride type is drawn on the map, so it stays clean
+function syncMarkers(){
+  if(!map||!ambient)return;
+  drivers.forEach(d=>{
+    if(d.type===S.type){if(!d.mk)d.mk=driverMarker(d).addTo(ambient);else d.mk.setLatLng([d.lat,d.lng])}
+    else if(d.mk){ambient.removeLayer(d.mk);d.mk=null}
+  });
+}
+async function fetchNearby(){
+  if(!S.pickup||!REAL)return;
+  try{
+    const j=await fetchJSON(`${API}/api/nearby?lat=${S.pickup.lat}&lng=${S.pickup.lng}`,4000);
+    const old=new Map(drivers.map(d=>[d.id,d]));
+    drivers=j.drivers.map(x=>{const o=old.get(x.id);if(o){o.lat=x.lat;o.lng=x.lng;return o}return{...x}});
+    old.forEach(d=>{if(!drivers.includes(d)&&d.mk&&ambient)ambient.removeLayer(d.mk)});
+    syncMarkers();updateEtas();
+  }catch(e){}
+}
 function spawnAmbient(){
   clearAmbient();if(!S.pickup)return;driverCenter={lat:S.pickup.lat,lng:S.pickup.lng};
+  if(REAL){fetchNearby();wander=setInterval(()=>{if(!document.hidden)fetchNearby()},3000);return}
   drivers=[...Object.keys(RIDES),pick(Object.keys(RIDES)),'mini','auto'].map(t=>makeDriver(t,S.pickup,.5,3.5));
-  if(map)drivers.forEach(d=>{d.mk=driverMarker(d).addTo(ambient)});
-  wander=setInterval(()=>{if(document.hidden)return;drivers.forEach(d=>{const q=offsetPoint(d,rnd(.01,.04));d.lat=q.lat;d.lng=q.lng;if(d.mk)d.mk.setLatLng([d.lat,d.lng])});updateEtas()},2000);
+  syncMarkers();
+  wander=setInterval(()=>{if(document.hidden)return;drivers.forEach(d=>{const q=offsetPoint(d,rnd(.01,.04));d.lat=q.lat;d.lng=q.lng});syncMarkers();updateEtas()},2000);
   updateEtas();
 }
 function clearAmbient(){clearInterval(wander);drivers=[];driverCenter=null;if(ambient)ambient.clearLayers()}
@@ -814,7 +848,7 @@ function render(){
   $('#walletPill').textContent=REAL?(USER?USER.name.split(' ')[0]:'Sign in'):'Wallet '+inr(S.wallet);
   const nm=(USER?USER.name:$('#name').value).trim().split(' ')[0];$('#hello').textContent=nm?`Where to, ${nm}?`:'Where to?';
   $('#sum').innerHTML=S.pickup&&S.drop?`<div class="rt"><span class="d2" style="background:#0b1f3f"></span><div><b>${esc(S.pickup.name.split(',')[0])}</b></div></div>${S.stop?`<div class="rt"><span class="d2" style="background:#b4831a"></span><div>${esc(S.stop.name.split(',')[0])}</div></div>`:''}<div class="rt"><span class="d2" style="background:#3f6fa8;border-radius:2px"></span><div><b>${esc(S.drop.name.split(',')[0])}</b></div></div><div class="meta">${RIDES[S.type].name} · ${whenText()}${c?` · ${c.km.toFixed(1)} km · ${c.min} min`:''}</div>`:'<span class="muted">Choose pickup and drop in step 1.</span>';
-  buildCars();buildPays();buildForecast();buildOffers();
+  buildCars();buildPays();buildForecast();buildOffers();syncMarkers();
   $('#next').textContent=step===1?'Continue':'Review and pay';
 }
 function buildCars(){
@@ -1058,7 +1092,7 @@ async function chooseDriver(d){
   const r=await getRoute([d,S.pickup]);if(trip.cancelled)return;arriving(d,r);
 }
 const steps=n=>`<div class="steps">${[0,1,2,3].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</div>`;
-const driverCard=(d,extra='')=>`<div class="driver"><div class="avatar">${esc(d.name[0])}</div><div><b>${esc(d.name)}</b> · ★ ${d.rating}<br><small class="muted">${d.model} · ${d.plate}</small></div>${extra}</div>`;
+const driverCard=(d,extra='')=>`<div class="driver"><div class="avatar">${esc(d.name[0])}</div><div><b>${esc(d.name)}</b> · ★ ${d.rating}${d.demo?' <span class="tag">Demo driver</span>':''}<br><small class="muted">${d.model} · ${d.plate}</small></div>${extra}</div>`;
 const chatHTML=()=>`<details class="chat"><summary style="cursor:pointer;font-weight:600">Chat with driver</summary><div class="msgs" id="msgs" style="margin-top:.5rem"></div><div class="chips">${["I'm at the gate",'Please wait 2 minutes','Please call me'].map(t=>`<button class="chip" data-m="${t}">${t}</button>`).join('')}</div></details>`;
 const ctrl=`<div class="btns"><button id="call">Call</button><button id="share">Share trip</button><button class="sos" id="sos">SOS</button></div>`;
 function playerHTML(){
@@ -1158,7 +1192,8 @@ async function realConfirm(){
 }
 async function startReal(c){
   try{
-    const j=await apiCall('/api/rides',{pickup:S.pickup,drop:S.drop,stop:S.stop,type:S.type,km:S.route.km,min:S.route.min,total:c.total,payMethod:S.pay==='cash'?'cash':'online',note:$('#note').value,riders:S.riders});
+    const pts=S.route.coords,st=Math.ceil(pts.length/100)||1,path=pts.filter((_,i)=>i%st===0);
+    const j=await apiCall('/api/rides',{pickup:S.pickup,drop:S.drop,stop:S.stop,type:S.type,km:S.route.km,min:S.route.min,total:c.total,path,payMethod:S.pay==='cash'?'cash':'online',note:$('#note').value,riders:S.riders});
     RR={ride:j.ride,c,mk:null,dloc:null,saved:false};
     openLiveUi();connectEvents();paintReal();
   }catch(e){toast(e.message)}
@@ -1212,7 +1247,7 @@ function liveBits(){
 function paintReal(){
   const r=RR.ride,d=r.driver,pn=esc(r.pickup.name.split(',')[0]),dn=esc(r.drop.name.split(',')[0]);
   const common=()=>{
-    const c=$('#rcall');if(c)c.onclick=()=>{location.href='tel:+91'+d.phone};
+    const c=$('#rcall');if(c)c.onclick=()=>{if(!d.phone)toast('This is a demo driver, so there is no phone number.');else location.href='tel:+91'+d.phone};
     const sh=$('#rshare');if(sh)sh.onclick=()=>copy(`I'm riding with RideZy: ${r.pickup.name} to ${r.drop.name}. Driver ${d.name}, ${d.model} ${d.plate}.`,'Trip details copied. Paste them to someone you trust.');
     const cx=$('#rcx');if(cx)cx.onclick=cancelReal;
     const so=$('#rsos');if(so)so.onclick=()=>toast('Demo: SOS is not connected to emergency services yet.');

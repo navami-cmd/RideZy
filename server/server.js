@@ -34,6 +34,10 @@ const RADIUS_KM = Number(process.env.DISPATCH_RADIUS_KM) || 10;
 const REQUIRE_APPROVAL = process.env.REQUIRE_DRIVER_APPROVAL === 'true';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
 const REQUEST_TIMEOUT_MS = 60000;
+// Demo drivers: simulated drivers that appear near any pickup so a rider can always get a ride while testing.
+// Real drivers (people signed in at /driver.html) always get a request first. Turn this off before a real launch.
+const DEMO = process.env.DEMO_DRIVERS ? process.env.DEMO_DRIVERS === 'true' : !PROD;
+const TIME_SCALE = Number(process.env.DEMO_TIME_SCALE) || 1;   // >1 makes demo drivers faster (used by tests)
 
 /* ----------------------------------------------------------------- store */
 const DB_FILE = path.join(ROOT, 'data', 'db.json');
@@ -44,12 +48,17 @@ function saveNow() {
   try {
     fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
     const tmp = DB_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(db));
+    const keep = { ...db, users: Object.fromEntries(Object.entries(db.users).filter(([, u]) => !u.bot)) };
+    fs.writeFileSync(tmp, JSON.stringify(keep));
     fs.renameSync(tmp, DB_FILE);
   } catch (e) { console.error('Could not save data:', e.message); }
 }
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 200); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { saveNow(); process.exit(0); });
+
+for (const r of Object.values(db.rides)) {
+  if (['searching', 'accepted', 'arrived', 'started'].includes(r.status) && (!r.driverId || !db.users[r.driverId])) r.status = 'cancelled';
+}
 
 const otps = new Map();       // phone -> { code, exp, tries, sentAt }
 const online = new Map();     // driverId -> { lat, lng, ts }
@@ -89,7 +98,7 @@ function driverPublic(u) {
   const o = online.get(u.id);
   return {
     name: u.name, rating: u.ratingCount ? (u.ratingSum / u.ratingCount).toFixed(1) : '4.8', trips: u.trips || 0,
-    type: u.vehicle.type, model: u.vehicle.model, plate: u.vehicle.plate, phone: u.phone,
+    type: u.vehicle.type, model: u.vehicle.model, plate: u.vehicle.plate, phone: u.bot ? '' : u.phone, demo: !!u.bot,
     lat: o ? o.lat : null, lng: o ? o.lng : null
   };
 }
@@ -125,20 +134,120 @@ function candidatesFor(r) {
     .filter(([id]) => db.users[id] && db.users[id].vehicle.type === r.type && !activeRideOf(id, 'driver'))
     .map(([id, o]) => ({ id, d: haversine(o, r.pickup) }))
     .filter((c) => c.d <= RADIUS_KM)
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 5);
+    .sort((a, b) => (db.users[a.id].bot ? 1 : 0) - (db.users[b.id].bot ? 1 : 0) || a.d - b.d)
+    .slice(0, 6);
 }
 function requestPayload(r, d) {
   return { id: r.id, type: r.type, pickup: r.pickup, drop: r.drop, stop: r.stop || null, km: r.km, min: r.min, fare: r.fare, note: r.note, payMethod: r.payMethod, distanceToPickup: Number(d.toFixed(1)) };
 }
 function dispatch(r) {
-  const c = candidatesFor(r);
+  let c = candidatesFor(r);
+  if (!c.length && DEMO) { for (let i = 0; i < 2; i++) spawnBot(r.type, r.pickup, 0.6, 2.5); c = candidatesFor(r); }
   if (!c.length) { r.status = 'no_drivers'; save(); notifyRide(r); return; }
-  for (const x of c) emit(x.id, 'ride_request', requestPayload(r, x.d));
+  const real = c.filter((x) => !db.users[x.id].bot);
+  for (const x of real) emit(x.id, 'ride_request', requestPayload(r, x.d));
   requestTimers.set(r.id, setTimeout(() => {
     requestTimers.delete(r.id);
     if (r.status === 'searching') { r.status = 'no_drivers'; save(); notifyRide(r); }
   }, REQUEST_TIMEOUT_MS));
+  // demo drivers wait longer when a real driver is nearby, so the real driver gets the first chance
+  if (DEMO && c.some((x) => db.users[x.id].bot)) setTimeout(() => botAccept(r), (real.length ? 9000 : 2200) / TIME_SCALE);
+}
+function assign(r, driver) {
+  r.driverId = driver.id; r.status = 'accepted'; r.acceptedAt = Date.now();
+  clearTimeout(requestTimers.get(r.id)); requestTimers.delete(r.id);
+  save(); notifyRide(r);
+  for (const [id] of online) if (id !== driver.id) emit(id, 'ride_taken', { id: r.id });
+}
+
+/* -------------------------------------------------------- demo drivers */
+const MODELS = {
+  bike: ['Honda Shine', 'TVS Apache', 'Bajaj Pulsar'], pool: ['Maruti Swift', 'Hyundai i10'], auto: ['Bajaj RE Auto', 'Piaggio Ape'],
+  mini: ['Maruti Swift', 'Hyundai i10', 'Tata Tiago'], sedan: ['Honda City', 'Toyota Etios', 'Hyundai Verna'],
+  suv: ['Toyota Innova', 'Maruti Ertiga'], luxe: ['Chevrolet Corvette Stingray']
+};
+const BOT_NAMES = ['Karthik', 'Murugan', 'Senthil', 'Ravi', 'Vignesh', 'Arjun', 'Suresh', 'Prakash', 'Dinesh', 'Manoj', 'Bala', 'Ganesh', 'Naveen', 'Ramesh', 'Kumar', 'Selvam'];
+const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
+const rndr = (a, b) => a + Math.random() * (b - a);
+function offsetPoint(p, km) {
+  const a = rndr(0, Math.PI * 2);
+  return { lat: p.lat + km * Math.cos(a) / 111, lng: p.lng + km * Math.sin(a) / (111 * Math.cos(p.lat * Math.PI / 180)) };
+}
+const botCount = () => Object.values(db.users).filter((u) => u.bot).length;
+function spawnBot(type, around, minKm, maxKm) {
+  const p = offsetPoint(around, rndr(minKm, maxKm)), id = uid('b_'), n = Math.floor(rndr(300, 5000));
+  db.users[id] = {
+    id, phone: '', name: pickOne(BOT_NAMES), role: 'driver', bot: true, approved: true, createdAt: Date.now(), trips: n,
+    ratingSum: Number((rndr(4.5, 5) * n).toFixed(1)), ratingCount: n,
+    vehicle: { type, model: pickOne(MODELS[type]), plate: `TN ${pickOne(['19', '22', '21', '11'])} ${String.fromCharCode(65 + crypto.randomInt(26))}${String.fromCharCode(65 + crypto.randomInt(26))} ${crypto.randomInt(1000, 10000)}` }
+  };
+  online.set(id, { lat: p.lat, lng: p.lng, ts: Date.now() });
+  return db.users[id];
+}
+function botAccept(r) {
+  if (r.status !== 'searching') return;
+  const c = candidatesFor(r).find((x) => db.users[x.id].bot);
+  if (!c) return;
+  const bot = db.users[c.id];
+  assign(r, bot);
+  runBot(r, bot);
+}
+function runBot(r, bot) {
+  const alive = () => db.rides[r.id] && db.rides[r.id].driverId === bot.id && !['cancelled', 'completed'].includes(r.status);
+  function travel(points, ms, onDone) {
+    const cum = [0];
+    for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversine(points[i - 1], points[i]));
+    const total = cum[cum.length - 1] || 0.001, t0 = Date.now(), dur = ms / TIME_SCALE;
+    let idx = 0;
+    const timer = setInterval(() => {
+      if (!alive()) { clearInterval(timer); return; }
+      const k = Math.min(1, (Date.now() - t0) / dur), d = total * k;
+      while (idx < cum.length - 2 && cum[idx + 1] < d) idx++;
+      const seg = (cum[idx + 1] - cum[idx]) || 0.0001, f = Math.min(1, Math.max(0, (d - cum[idx]) / seg));
+      const a = points[idx], b = points[Math.min(idx + 1, points.length - 1)];
+      const lat = a.lat + (b.lat - a.lat) * f, lng = a.lng + (b.lng - a.lng) * f;
+      online.set(bot.id, { lat, lng, ts: Date.now() });
+      emit(r.riderId, 'driver_location', { rideId: r.id, lat, lng });
+      if (k >= 1) { clearInterval(timer); onDone(); }
+    }, 500);
+  }
+  const here = online.get(bot.id), toPickup = haversine(here, r.pickup);
+  travel([{ lat: here.lat, lng: here.lng }, r.pickup], Math.min(20000, Math.max(7000, toPickup * 2500)), () => {
+    if (!alive()) return;
+    r.status = 'arrived'; save(); notifyRide(r);
+    setTimeout(() => {                                        // the demo driver "enters" the rider's OTP
+      if (!alive() || r.status !== 'arrived') return;
+      r.status = 'started'; r.startedAt = Date.now(); save(); notifyRide(r);
+      const path = [r.pickup, ...(r.path || []).map((p) => ({ lat: p[0], lng: p[1] })), r.drop];
+      travel(path, Math.min(40000, Math.max(15000, r.km * 900)), () => {
+        if (!alive()) return;
+        r.status = 'completed'; r.completedAt = Date.now();
+        r.payStatus = r.payMethod === 'cash' ? 'paid' : 'due';
+        bot.trips = (bot.trips || 0) + 1; save(); notifyRide(r);
+      });
+    }, 4000 / TIME_SCALE);
+  });
+}
+// idle demo drivers drift a little so the map looks alive; old idle ones are removed
+setInterval(() => {
+  const bots = Object.values(db.users).filter((u) => u.bot);
+  for (const u of bots) {
+    const o = online.get(u.id);
+    if (!o || activeRideOf(u.id, 'driver')) continue;
+    const q = offsetPoint(o, rndr(0.01, 0.04));
+    online.set(u.id, { lat: q.lat, lng: q.lng, ts: Date.now() });
+  }
+  const idle = bots.filter((u) => !activeRideOf(u.id, 'driver')).sort((a, b) => a.createdAt - b.createdAt);
+  if (idle.length > 80) idle.slice(0, idle.length - 80).forEach((u) => { online.delete(u.id); delete db.users[u.id]; });
+}, 2500);
+
+const hits = new Map();
+function limit(req, max) {
+  const ip = req.socket.remoteAddress || 'x', now = Date.now();
+  let h = hits.get(ip);
+  if (!h || now - h.ts > 60000) h = { n: 0, ts: now };
+  h.n++; hits.set(ip, h);
+  if (h.n > max) throw fail(429, 'Too many requests. Please slow down.');
 }
 
 /* ------------------------------------------------------------------- SMS */
@@ -164,11 +273,12 @@ const R = (method, pattern, handler, opts = {}) =>
 const fail = (code, error) => { const e = new Error(error); e.status = code; return e; };
 
 R('GET', '/api/health', async () => ({
-  ok: true, payments: RZP_ID && RZP_SECRET ? 'razorpay' : 'demo', sms: TWILIO.sid ? 'sms' : 'console', requireApproval: REQUIRE_APPROVAL
+  ok: true, payments: RZP_ID && RZP_SECRET ? 'razorpay' : 'demo', sms: TWILIO.sid ? 'sms' : 'console', requireApproval: REQUIRE_APPROVAL, demoDrivers: DEMO
 }), { auth: false });
 
 /* ---- auth ---- */
-R('POST', '/api/auth/request-otp', async ({ body }) => {
+R('POST', '/api/auth/request-otp', async ({ req, body }) => {
+  limit(req, 12);
   const phone = String(body.phone || '');
   if (!isPhone(phone)) throw fail(400, 'Enter a valid 10-digit mobile number.');
   const prev = otps.get(phone);
@@ -221,6 +331,11 @@ R('POST', '/api/rides', async ({ user, body }) => {
   const pickup = place(body.pickup), drop = place(body.drop), stop = body.stop ? place(body.stop) : null;
   const type = String(body.type || ''), km = num(body.km, 0.1, 500), min = num(body.min, 1, 600);
   if (!pickup || !drop || !RATES[type] || km === null || min === null) throw fail(400, 'Trip details are incomplete.');
+  let path = [];
+  if (Array.isArray(body.path)) {
+    path = body.path.slice(0, 600).map((p) => (Array.isArray(p) && p.length === 2 ? [num(p[0], -90, 90), num(p[1], -180, 180)] : null)).filter((p) => p && p[0] !== null && p[1] !== null);
+    const st = Math.ceil(path.length / 120) || 1; path = path.filter((_, i) => i % st === 0);
+  }
   const payMethod = body.payMethod === 'cash' ? 'cash' : 'online';
   const est = estimate(type, km, min);
   let fare = Number(body.total);                     // promo, tip and rain are applied on the client; keep it within a sane range
@@ -228,7 +343,7 @@ R('POST', '/api/rides', async ({ user, body }) => {
   const r = {
     id: uid('r_'), riderId: user.id, driverId: null, status: 'searching', type, pickup, drop, stop, km, min,
     fare: Math.round(fare), payMethod, payStatus: 'pending', note: String(body.note || '').slice(0, 200),
-    riders: num(body.riders, 1, 6) || 1, otp: String(crypto.randomInt(1000, 10000)), createdAt: Date.now()
+    path, riders: num(body.riders, 1, 6) || 1, otp: String(crypto.randomInt(1000, 10000)), createdAt: Date.now()
   };
   db.rides[r.id] = r; save();
   dispatch(r);
@@ -256,11 +371,7 @@ R('POST', '/api/rides/:id/accept', async ({ user, params }) => {
   if (activeRideOf(user.id, 'driver')) throw fail(409, 'Finish your current ride first.');
   if (r.status !== 'searching') throw fail(409, 'This ride is no longer available.');
   if (user.vehicle.type !== r.type) throw fail(409, 'This ride needs a different vehicle type.');
-  r.driverId = user.id; r.status = 'accepted'; r.acceptedAt = Date.now();
-  clearTimeout(requestTimers.get(r.id)); requestTimers.delete(r.id);
-  save(); notifyRide(r);
-  for (const x of candidatesFor({ ...r, type: r.type })) if (x.id !== user.id) emit(x.id, 'ride_taken', { id: r.id });
-  for (const [id] of online) if (id !== user.id) emit(id, 'ride_taken', { id: r.id });
+  assign(r, user);
   return { ride: ridePublic(r, 'driver') };
 }, { role: 'driver' });
 
@@ -302,6 +413,26 @@ R('POST', '/api/rides/:id/rate', async ({ user, params, body }) => {
   save();
   return { ok: true };
 }, { role: 'rider' });
+
+/* ---- nearby drivers (anonymous: only type and position) ---- */
+const pubId = (id) => crypto.createHash('sha1').update(id).digest('hex').slice(0, 10);
+R('GET', '/api/nearby', async ({ req, u }) => {
+  limit(req, 90);
+  const lat = num(u.searchParams.get('lat'), -90, 90), lng = num(u.searchParams.get('lng'), -180, 180);
+  if (lat === null || lng === null) throw fail(400, 'lat and lng are required.');
+  const c = { lat, lng };
+  if (DEMO) {                                           // make sure a few demo drivers of every type are around
+    let spawned = 0;
+    for (const type of Object.keys(RATES)) {
+      const have = [...online.entries()].filter(([id, o]) => db.users[id] && db.users[id].vehicle.type === type && haversine(o, c) <= 4).length;
+      for (let i = have; i < 2 && spawned < 14 && botCount() < 90; i++) { spawnBot(type, c, 0.5, 3.2); spawned++; }
+    }
+  }
+  const drivers = [...online.entries()]
+    .filter(([id, o]) => db.users[id] && haversine(o, c) <= 6 && !activeRideOf(id, 'driver'))
+    .map(([id, o]) => ({ id: pubId(id), type: db.users[id].vehicle.type, lat: o.lat, lng: o.lng, demo: !!db.users[id].bot }));
+  return { demo: DEMO, drivers };
+}, { auth: false });
 
 /* ---- driver ---- */
 R('POST', '/api/driver/online', async ({ user, body }) => {
@@ -463,5 +594,6 @@ server.listen(PORT, () => {
   console.log(`\n  RideZy is running:   http://localhost:${PORT}`);
   console.log(`  Driver app:          http://localhost:${PORT}/driver.html`);
   console.log(`  Payments:            ${RZP_ID && RZP_SECRET ? 'Razorpay' : 'demo mode (add Razorpay keys in .env)'}`);
+  console.log(`  Demo drivers:        ${DEMO ? 'on (simulated drivers appear near any pickup)' : 'off'}`);
   console.log(`  OTP delivery:        ${TWILIO.sid ? 'SMS (Twilio)' : 'printed in this console (add Twilio keys in .env for real SMS)'}\n`);
 });
