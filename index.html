@@ -1248,7 +1248,7 @@ function paintReal(){
   const r=RR.ride,d=r.driver,pn=esc(r.pickup.name.split(',')[0]),dn=esc(r.drop.name.split(',')[0]);
   const common=()=>{
     const c=$('#rcall');if(c)c.onclick=()=>{if(!d.phone)toast('This is a demo driver, so there is no phone number.');else location.href='tel:+91'+d.phone};
-    const sh=$('#rshare');if(sh)sh.onclick=()=>copy(`I'm riding with RideZy: ${r.pickup.name} to ${r.drop.name}. Driver ${d.name}, ${d.model} ${d.plate}.`,'Trip details copied. Paste them to someone you trust.');
+    const sh=$('#rshare');if(sh)sh.onclick=()=>shareLive(r);
     const cx=$('#rcx');if(cx)cx.onclick=cancelReal;
     const so=$('#rsos');if(so)so.onclick=()=>toast('Demo: SOS is not connected to emergency services yet.');
   };
@@ -1291,6 +1291,14 @@ function paintReal(){
     $('#heart').onclick=()=>{if(fav())S.favs=S.favs.filter(f=>f.plate!==d.plate);else S.favs.push({name:d.name,rating:d.rating,trips:d.trips,model:d.model,plate:d.plate,type:r.type});lsSet('ridezy_favs',S.favs);$('#heart').textContent=fav()?'❤️':'🤍';buildFavs()};
     $('#rdone').onclick=()=>{endReal();toast('Thanks for riding with RideZy!')};
   }
+}
+async function shareLive(r){
+  try{
+    const j=await apiCall('/api/rides/'+r.id+'/share',{});
+    const link=`${API||location.origin}/track.html?t=${j.token}`,text=`Follow my RideZy trip live: ${link}`;
+    if(navigator.share){try{await navigator.share({title:'My RideZy trip',text,url:link});return}catch(e){if(e.name==='AbortError')return}}
+    copy(text,'Live trip link copied. Send it to someone you trust.');
+  }catch(e){toast(e.message)}
 }
 async function cancelReal(){
   try{await apiCall('/api/rides/'+RR.ride.id+'/status',{status:'cancelled'});endReal();toast('Ride cancelled.')}catch(e){toast(e.message)}

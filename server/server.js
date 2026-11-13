@@ -414,6 +414,33 @@ R('POST', '/api/rides/:id/rate', async ({ user, params, body }) => {
   return { ok: true };
 }, { role: 'rider' });
 
+/* ---- live trip sharing: a link anyone can open to follow one trip ---- */
+R('POST', '/api/rides/:id/share', async ({ user, params }) => {
+  const r = db.rides[params.id];
+  if (!r || r.riderId !== user.id) throw fail(404, 'Ride not found.');
+  if (r.status === 'cancelled' || r.status === 'no_drivers') throw fail(409, 'This ride is not active.');
+  if (!r.shareToken) { r.shareToken = crypto.randomBytes(12).toString('hex'); save(); }
+  return { token: r.shareToken };
+}, { role: 'rider' });
+
+// public and read-only. It shows the driver's first name, vehicle, plate and position, and the two place names.
+// It never shows the rider's name or phone, the OTP or the fare. The link stops working 30 minutes after the trip ends.
+R('GET', '/api/track/:token', async ({ req, params }) => {
+  limit(req, 120);
+  const token = String(params.token || '');
+  const r = token.length === 24 ? Object.values(db.rides).find((x) => x.shareToken === token) : null;
+  if (!r) throw fail(404, 'This link is not valid.');
+  const final = ['completed', 'cancelled', 'no_drivers'].includes(r.status);
+  if (final && Date.now() - (r.completedAt || r.createdAt) > 30 * 60000) throw fail(410, 'This trip link has expired.');
+  const d = r.driverId && db.users[r.driverId], o = d && !final ? online.get(d.id) : null;
+  return {
+    status: r.status, type: r.type, km: r.km,
+    pickup: { name: r.pickup.name, lat: r.pickup.lat, lng: r.pickup.lng },
+    drop: { name: r.drop.name, lat: r.drop.lat, lng: r.drop.lng },
+    driver: d ? { name: d.name.split(' ')[0], model: d.vehicle.model, plate: d.vehicle.plate, lat: o ? o.lat : null, lng: o ? o.lng : null } : null
+  };
+}, { auth: false });
+
 /* ---- nearby drivers (anonymous: only type and position) ---- */
 const pubId = (id) => crypto.createHash('sha1').update(id).digest('hex').slice(0, 10);
 R('GET', '/api/nearby', async ({ req, u }) => {
@@ -569,7 +596,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.
 function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel === '/' || rel === '') rel = '/index.html';
-  const allowed = rel === '/index.html' || rel === '/driver.html' || rel.startsWith('/images/');
+  const allowed = rel === '/index.html' || rel === '/driver.html' || rel === '/track.html' || rel.startsWith('/images/');
   const file = path.normalize(path.join(ROOT, rel));
   if (!allowed || !file.startsWith(ROOT + path.sep)) { res.writeHead(404); return res.end('Not found'); }
   fs.readFile(file, (err, data) => {
