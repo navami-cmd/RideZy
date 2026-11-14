@@ -106,7 +106,7 @@ function ridePublic(r, role) {
   const out = {
     id: r.id, status: r.status, type: r.type, pickup: r.pickup, drop: r.drop, stop: r.stop || null, km: r.km, min: r.min,
     fare: r.fare, payMethod: r.payMethod, payStatus: r.payStatus, note: r.note, riders: r.riders, createdAt: r.createdAt,
-    rating: r.rating || null
+    rating: r.rating || null, reviewDone: !!r.reviewDone, completedAt: r.completedAt || null
   };
   const rider = db.users[r.riderId], driver = r.driverId && db.users[r.driverId];
   if (role === 'rider') {
@@ -354,7 +354,7 @@ R('GET', '/api/rides/active', async ({ user }) => {
   const r = activeRideOf(user.id, user.role);
   if (r) return { ride: ridePublic(r, user.role) };
   // a finished ride that still needs payment or a rating
-  const last = Object.values(db.rides).filter((x) => x.riderId === user.id && x.status === 'completed' && (x.payStatus !== 'paid' || !x.rating))
+  const last = Object.values(db.rides).filter((x) => x.riderId === user.id && x.status === 'completed' && (x.payStatus !== 'paid' || (!x.rating && !x.reviewDone)))
     .sort((a, b) => b.createdAt - a.createdAt)[0];
   return { ride: user.role === 'rider' && last ? ridePublic(last, 'rider') : null };
 });
@@ -401,13 +401,17 @@ R('POST', '/api/rides/:id/status', async ({ user, params, body }) => {
   return { ride: ridePublic(r, user.role) };
 });
 
+const REVIEW_TAGS = ['Great driver', 'Clean car', 'Safe driving', 'Smooth route', 'On time', 'Friendly'];
 R('POST', '/api/rides/:id/rate', async ({ user, params, body }) => {
   const r = db.rides[params.id];
   if (!r || r.riderId !== user.id || r.status !== 'completed') throw fail(404, 'Ride not found.');
+  if (r.rating || r.reviewDone) throw fail(409, 'You already reviewed this ride.');
+  if (body.skip) { r.reviewDone = true; save(); return { ok: true }; }      // the rider chose not to leave a review
   const stars = num(body.stars, 1, 5);
   if (stars === null) throw fail(400, 'Choose 1 to 5 stars.');
-  if (r.rating) throw fail(409, 'You already rated this ride.');
   r.rating = Math.round(stars);
+  r.review = { stars: r.rating, tags: Array.isArray(body.tags) ? body.tags.filter((t) => REVIEW_TAGS.includes(t)).slice(0, 6) : [], comment: String(body.comment || '').slice(0, 200) };
+  r.reviewDone = true;
   const d = db.users[r.driverId];
   if (d) { d.ratingSum = (d.ratingSum || 0) + r.rating; d.ratingCount = (d.ratingCount || 0) + 1; }
   save();

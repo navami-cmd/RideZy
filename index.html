@@ -264,6 +264,43 @@ details.more[open] summary::after{content:"–"}
 .modeb{font-size:.72rem;font-weight:700;padding:.2rem .6rem;border-radius:99px;background:var(--sky);color:var(--muted)}
 .modeb.live{background:#d9f2e5;color:var(--ok)}
 .wallet{cursor:pointer}
+.rbox{width:min(440px,100%);max-height:94vh;overflow:auto;background:#fff;border-radius:20px;box-shadow:0 30px 80px -20px rgba(0,0,0,.55);animation:rise .4s cubic-bezier(.2,.9,.3,1.05)}
+@keyframes rise{from{transform:translateY(30px);opacity:0}}
+.rc{padding:1.3rem 1.4rem 1.1rem;background:linear-gradient(#fff,#f9fbfe);border-bottom:2px dashed var(--line)}
+.rhead{display:flex;align-items:center;gap:.7rem}
+.rhead img{height:22px}
+.rhead b{font-family:var(--display);font-size:1.3rem;display:block;line-height:1}
+.rhead small{color:var(--muted);font-size:.74rem}
+.rwhen{margin-left:auto;text-align:right}
+.rroute{margin:1rem 0 .6rem;font-size:.95rem}
+.rroute div{display:flex;gap:.6rem;align-items:flex-start;margin-bottom:.3rem;font-weight:500}
+.rroute .d2{width:10px;height:10px;border-radius:50%;margin-top:.4rem;flex:none;background:var(--navy)}
+.rroute .d2.sq{border-radius:2px;background:var(--blue)}
+.rroute small{color:var(--muted);display:block;margin-left:1.2rem;font-weight:400}
+.rdrv{font-size:.88rem;color:var(--muted);margin-bottom:.6rem}
+.rtotal{position:relative;display:flex;justify-content:space-between;align-items:baseline;margin-top:.8rem}
+.rtotal b{font-family:var(--display);font-size:2rem;letter-spacing:-.02em}
+.rpaid{font-size:.84rem;color:var(--muted);margin-top:.2rem}
+.stamp{position:absolute;left:4.2rem;top:-.6rem;transform:rotate(-13deg);border:3px double var(--ok);color:var(--ok);border-radius:10px;padding:.2rem .8rem;font-family:var(--display);font-weight:900;letter-spacing:.14em;font-size:1.35rem;text-align:center;line-height:1.1;animation:stampIn .45s .45s cubic-bezier(.2,1.5,.4,1) both;background:rgba(255,255,255,.55);mix-blend-mode:multiply;pointer-events:none}
+.stamp small{display:block;font-family:var(--body);font-size:.55rem;letter-spacing:.1em;font-weight:700}
+@keyframes stampIn{from{transform:rotate(-13deg) scale(2.4);opacity:0}to{transform:rotate(-13deg) scale(1);opacity:.9}}
+.rrev{padding:1.1rem 1.4rem 1.3rem}
+.rq{font-family:var(--display);font-weight:800;font-size:1.15rem;margin-bottom:.3rem}
+.rstars{display:flex;gap:.2rem}
+.rstars button{font-size:2rem;filter:grayscale(1);opacity:.4;transition:transform .15s}
+.rstars button:hover{transform:scale(1.15)}
+.rstars button.on{filter:none;opacity:1}
+.rtags{margin-top:.6rem}
+.rfav{margin-top:.8rem;font-size:.88rem;font-weight:600;color:var(--blue)}
+.rbtns{display:flex;gap:.6rem;margin-top:1rem}
+.rbtns .btn{margin:0}
+@media print{
+  body{height:auto;overflow:visible;background:#fff}
+  .app,#intro,#toast,#auth,.noprint{display:none!important}
+  #rcpt{position:static;background:none;display:block;padding:0}
+  .rbox{box-shadow:none;max-height:none;overflow:visible;width:100%;max-width:440px;margin:0 auto;animation:none}
+  .stamp{animation:none;opacity:.9}
+}
 /* =========================================================
    INTRO: dark navy, car drives in, "Ride" + "Zy" in white
    ========================================================= */
@@ -466,6 +503,7 @@ details.more[open] summary::after{content:"–"}
     </section>
   </main>
 </div>
+<div class="modal" id="rcpt" hidden><div class="rbox" role="dialog" aria-modal="true" aria-label="Ride receipt"></div></div>
 <div class="modal" id="auth" hidden role="dialog" aria-modal="true" aria-labelledby="atitle">
   <div class="mbox">
     <h2 id="atitle">Sign in</h2>
@@ -1166,17 +1204,64 @@ function finish(d){
   S.trips.unshift({from:S.pickup.name,to:S.drop.name,fromP:S.pickup,toP:S.drop,type:RIDES[S.type].name,typeKey:S.type,total:c.total,km:r.km,tree:c.tree,thumb:makeThumb(r.coords),
     date:new Date().toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}),status:'Completed with '+d.name,rows:c.rows});
   S.trips=S.trips.slice(0,20);lsSet('ridezy_trips',S.trips);
-  const isFav=()=>S.favs.some(f=>f.plate===d.plate);
-  view(`<div class="tt">You've arrived</div><div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+  view(`<div class="tt">Trip complete</div><div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
     <div class="total"><span>Paid by ${{upi:'UPI',cash:'cash',card:'card',wallet:'Zy Wallet'}[S.pay]}</span><b>${inr(c.total)}</b></div>
-    <p style="margin:1rem 0 .2rem"><b>How was ${esc(d.name)}?</b></p>
-    <div class="stars" id="stars">${[1,2,3,4,5].map(n=>`<button data-n="${n}" aria-label="${n} stars">⭐</button>`).join('')}<button id="heart" aria-label="Save as favourite driver" style="font-size:1.6rem;margin-left:.5rem">${isFav()?'❤️':'🤍'}</button></div>
-    <p class="hint">Tap the heart to save ${esc(d.name)} as a favourite and request them next time.</p>
-    <div class="btns"><button class="go" id="again">Book another ride</button></div>`);
-  $('#stars').onclick=e=>{const b=e.target.closest('button');if(!b||b.id==='heart')return;[...$('#stars').children].forEach((x,i)=>{if(x.id!=='heart')x.classList.toggle('on',i<+b.dataset.n)})};
-  $('#heart').onclick=()=>{if(isFav())S.favs=S.favs.filter(f=>f.plate!==d.plate);else S.favs.push({name:d.name,rating:d.rating,trips:d.trips,model:d.model,plate:d.plate,type:d.type});lsSet('ridezy_favs',S.favs);$('#heart').textContent=isFav()?'❤️':'🤍';buildFavs()};
+    <p class="muted small" style="margin-top:.6rem">Your receipt is ready.</p>
+    <div class="btns"><button id="rview">View receipt</button><button class="go" id="again">Book another ride</button></div>`);
+  const data={no:'RZ-'+Date.now().toString(36).slice(-6).toUpperCase(),when:new Date(),from:S.pickup.name,to:S.drop.name,km:r.km,min:r.min,type:RIDES[S.type].name,driver:{...d,type:S.type},rows:c.rows,total:c.total,
+    method:{upi:'UPI',cash:'Cash',card:'Card',wallet:'Zy Wallet'}[S.pay],reviewable:true,onReview:async()=>{},onSkip:async()=>{},onClose:()=>{endTrip();setStep(1);render()}};
+  $('#rview').onclick=()=>showReceipt({...data,reviewable:false,onClose:undefined});
   $('#again').onclick=()=>{endTrip();setStep(1);render();toast('Thanks for riding with RideZy!')};
+  setTimeout(()=>{if(trip&&!trip.cancelled)showReceipt(data)},450);
   render();refreshCards();
+}
+
+/* ================= RECEIPT POP-UP ================= */
+const REVIEW_TAGS=['Great driver','Clean car','Safe driving','Smooth route','On time','Friendly'];
+function showReceipt(d){
+  const when=d.when.toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'});
+  const short=t=>esc(t.split(',').slice(0,2).join(','));
+  const rows=d.rows.map(r=>`<div class="row ${r[1]<0?'neg':''}"><span>${esc(r[0])}</span><span>${r[1]<0?'−':''}${inr(Math.abs(r[1]))}</span></div>`).join('');
+  const dr=d.driver,box=$('#rcpt .rbox');
+  box.innerHTML=`<div class="rc">
+      <div class="rhead"><img src="images/logo.png" alt=""><div><b>RideZy</b><small>Receipt ${esc(d.no)}</small></div><small class="rwhen">${esc(when)}</small></div>
+      <div class="rroute"><div><span class="d2"></span><span>${short(d.from)}</span></div><div><span class="d2 sq"></span><span>${short(d.to)}</span></div><small>${d.km.toFixed(1)} km · ${d.min} min · ${esc(d.type)}</small></div>
+      ${dr?`<div class="rdrv">Driver <b>${esc(dr.name)}</b> · ${esc(dr.model)} · ${esc(dr.plate)}</div>`:''}
+      <div>${rows}</div>
+      <div class="rtotal"><span>Total</span><b>${inr(d.total)}</b><div class="stamp">PAID<small>${esc(d.method.split(' ')[0].toUpperCase())}</small></div></div>
+      <div class="rpaid">Paid by ${esc(d.method)}</div>
+    </div>
+    <div class="noprint rrev">
+      ${d.reviewable?`<div class="rq">How was your ride?</div>
+        <div class="rstars" id="rstars">${[1,2,3,4,5].map(n=>`<button data-n="${n}" aria-label="${n} star${n>1?'s':''}">⭐</button>`).join('')}</div>
+        <div class="rtags chips" id="rtags" hidden>${REVIEW_TAGS.map(t=>`<button class="chip" data-t="${t}" aria-pressed="false">${t}</button>`).join('')}</div>
+        ${dr?`<button class="rfav" id="rfav">${S.favs.some(f=>f.plate===dr.plate)?'Saved as a favourite driver':'Save '+esc(dr.name)+' as a favourite driver'}</button>`:''}
+        <div class="rbtns"><button class="btn ghost" id="rskip">Skip</button><button class="btn" id="rsubmit" disabled>Submit review</button></div>`
+      :`<div class="rbtns"><button class="btn" id="rclose">Close</button></div>`}
+      <button class="linkbtn" id="rprint" style="margin-top:.7rem">Save receipt as PDF</button>
+    </div>`;
+  let stars=0;const tags=new Set();let closed=false;
+  const finish=()=>{if(closed)return;closed=true;$('#rcpt').hidden=true;document.removeEventListener('keydown',onKey);$('#rcpt').onclick=null;if(d.onClose)d.onClose()};
+  const skip=async()=>{if(d.reviewable&&d.onSkip)await d.onSkip();finish()};
+  const onKey=e=>{if(e.key==='Escape')skip()};
+  document.addEventListener('keydown',onKey);
+  $('#rcpt').onclick=e=>{if(e.target.id==='rcpt')skip()};
+  $('#rprint').onclick=()=>window.print();
+  const rc=$('#rclose');if(rc)rc.onclick=finish;
+  if(d.reviewable){
+    $('#rskip').onclick=skip;
+    $('#rstars').onclick=e=>{const b=e.target.closest('button');if(!b)return;stars=+b.dataset.n;
+      [...$('#rstars').children].forEach((x,i)=>x.classList.toggle('on',i<stars));$('#rtags').hidden=false;$('#rsubmit').disabled=false};
+    $('#rtags').onclick=e=>{const b=e.target.closest('button');if(!b)return;const t=b.dataset.t;
+      if(tags.has(t))tags.delete(t);else tags.add(t);b.classList.toggle('on',tags.has(t));b.setAttribute('aria-pressed',tags.has(t))};
+    $('#rsubmit').onclick=async()=>{$('#rsubmit').disabled=true;if(d.onReview)await d.onReview(stars,[...tags]);toast('Thanks for your review!');finish()};
+    const fv=$('#rfav');if(fv)fv.onclick=()=>{
+      if(S.favs.some(f=>f.plate===dr.plate)){S.favs=S.favs.filter(f=>f.plate!==dr.plate);fv.textContent='Save '+dr.name+' as a favourite driver'}
+      else{S.favs.push({name:dr.name,rating:dr.rating,trips:dr.trips,model:dr.model,plate:dr.plate,type:dr.type});fv.textContent='Saved as a favourite driver'}
+      lsSet('ridezy_favs',S.favs);buildFavs()};
+  }
+  $('#rcpt').hidden=false;
+  const first=$('#rstars button')||$('#rclose');if(first)first.focus();
 }
 
 /* ================= LIVE RIDES (real drivers, via the server) ================= */
@@ -1282,15 +1367,30 @@ function paintReal(){
     const head=`<div class="tt">${needPay?'You have arrived':'Trip complete'}</div>${steps(3)}<div class="total"><span>${r.payMethod==='cash'?'Pay in cash to the driver':needPay?'Total to pay':'Paid online'}</span><b>${inr(r.fare)}</b></div>`;
     if(needPay){view(head+`<div class="btns"><button class="go" id="rpay">Pay ${inr(r.fare)}</button></div>`);
       $('#rpay').onclick=async()=>{try{const ok=await payOnline(r);if(!ok)toast('Payment was not completed.')}catch(e){toast(e.message)}};return}
-    const fav=()=>S.favs.some(f=>f.plate===d.plate);
-    view(head+`<p style="margin:1rem 0 .2rem"><b>${r.rating?'Thanks for rating '+esc(d.name):'How was '+esc(d.name)+'?'}</b></p>
-      <div class="stars" id="stars">${[1,2,3,4,5].map(n=>`<button data-n="${n}" class="${r.rating&&n<=r.rating?'on':''}" aria-label="${n} stars">⭐</button>`).join('')}<button id="heart" aria-label="Save as favourite driver" style="font-size:1.6rem;margin-left:.5rem">${fav()?'❤️':'🤍'}</button></div>
-      <div class="btns"><button class="go" id="rdone">Done</button></div>`);
-    $('#stars').onclick=async e=>{const b=e.target.closest('button');if(!b||b.id==='heart'||RR.ride.rating)return;
-      try{await apiCall('/api/rides/'+r.id+'/rate',{stars:+b.dataset.n});RR.ride.rating=+b.dataset.n;paintReal()}catch(err){toast(err.message)}};
-    $('#heart').onclick=()=>{if(fav())S.favs=S.favs.filter(f=>f.plate!==d.plate);else S.favs.push({name:d.name,rating:d.rating,trips:d.trips,model:d.model,plate:d.plate,type:r.type});lsSet('ridezy_favs',S.favs);$('#heart').textContent=fav()?'❤️':'🤍';buildFavs()};
-    $('#rdone').onclick=()=>{endReal();toast('Thanks for riding with RideZy!')};
+    view(head+`<p class="muted small" style="margin-top:.6rem">Your receipt is ready.</p><div class="btns"><button id="rview">View receipt</button><button class="go" id="rdone">Done</button></div>`);
+    $('#rview').onclick=openLiveReceipt;
+    $('#rdone').onclick=()=>{if(!r.rating&&!r.reviewDone)apiCall('/api/rides/'+r.id+'/rate',{skip:true}).catch(()=>{});endReal();toast('Thanks for riding with RideZy!')};
+    maybeReceipt();
   }
+}
+function liveReceiptData(r){
+  const rows0=RR&&RR.c?RR.c.rows:null,sum=rows0?rows0.reduce((a,x)=>a+x[1],0):0;
+  const rows=rows0&&Math.abs(sum-r.fare)<=1.5?rows0:[['Ride fare',r.fare]];
+  return{no:'RZ-'+r.id.slice(-6).toUpperCase(),when:new Date(r.completedAt||Date.now()),from:r.pickup.name,to:r.drop.name,km:r.km,min:r.min,type:RIDES[r.type].name,
+    driver:r.driver?{...r.driver,type:r.type}:null,rows,total:r.fare,method:r.payMethod==='cash'?'Cash':'Online (UPI or card)',reviewable:!r.rating&&!r.reviewDone};
+}
+function openLiveReceipt(){
+  if(!RR)return;
+  const r=RR.ride,d=liveReceiptData(r);RR.receiptShown=true;
+  d.onReview=async(stars,tags)=>{try{await apiCall('/api/rides/'+r.id+'/rate',{stars,tags});r.rating=stars}catch(e){toast(e.message)}};
+  d.onSkip=async()=>{try{await apiCall('/api/rides/'+r.id+'/rate',{skip:true});r.reviewDone=true}catch(e){}};
+  d.onClose=()=>{if(d.reviewable&&RR&&RR.ride.id===r.id)endReal()};     // after a review or a skip, the ride screen goes away
+  showReceipt(d);
+}
+function maybeReceipt(){
+  const r=RR.ride;
+  if(RR.receiptShown||r.status!=='completed'||r.payStatus!=='paid'||r.rating||r.reviewDone)return;
+  RR.receiptShown=true;setTimeout(()=>{if(RR&&RR.ride.id===r.id)openLiveReceipt()},450);
 }
 async function shareLive(r){
   try{
